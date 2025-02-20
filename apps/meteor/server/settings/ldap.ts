@@ -157,6 +157,11 @@ export const createLdapSettings = () =>
 				enableQuery,
 			});
 
+			await this.add('LDAP_Update_Data_On_OAuth_Login', false, {
+				type: 'boolean',
+				enableQuery: [enableQuery, { _id: 'LDAP_Update_Data_On_Login', value: true }],
+			});
+
 			await this.add('LDAP_Default_Domain', '', {
 				type: 'string',
 				enableQuery,
@@ -203,6 +208,11 @@ export const createLdapSettings = () =>
 					type: 'string',
 					enableQuery,
 					displayQuery: ldapOnly,
+				});
+
+				await this.add('LDAP_Extension_Field', '', {
+					type: 'string',
+					enableQuery,
 				});
 			});
 

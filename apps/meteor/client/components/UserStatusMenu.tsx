@@ -1,8 +1,10 @@
 import { UserStatus as UserStatusType } from '@rocket.chat/core-typings';
+import type { OptionType } from '@rocket.chat/fuselage';
 import { Button, PositionAnimated, Options, useCursor, Box } from '@rocket.chat/fuselage';
-import { useSetting, useTranslation } from '@rocket.chat/ui-contexts';
+import { useSetting } from '@rocket.chat/ui-contexts';
 import type { ReactElement, ComponentProps } from 'react';
-import React, { useRef, useCallback, useState, useMemo, useEffect } from 'react';
+import { useRef, useCallback, useState, useMemo, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { UserStatus } from './UserStatus';
 
@@ -21,14 +23,14 @@ const UserStatusMenu = ({
 	optionWidth = undefined,
 	placement = 'bottom-end',
 }: UserStatusMenuProps): ReactElement => {
-	const t = useTranslation();
+	const { t } = useTranslation();
 	const [status, setStatus] = useState(initialStatus);
-	const allowInvisibleStatus = useSetting('Accounts_AllowInvisibleStatusOption') as boolean;
+	const allowInvisibleStatus = useSetting('Accounts_AllowInvisibleStatusOption', true);
 
 	const options = useMemo(() => {
 		const renderOption = (status: UserStatusType, label: string): ReactElement => (
 			<Box display='flex' flexDirection='row' alignItems='center'>
-				<Box marginInlineEnd='x8'>
+				<Box marginInlineEnd={8}>
 					<UserStatus status={status} />
 				</Box>
 				{label}
@@ -65,15 +67,17 @@ const UserStatusMenu = ({
 	}, [show]);
 
 	const handleSelection = useCallback(
-		([selected]) => {
-			setStatus(selected);
+		([selected]: OptionType) => {
+			setStatus(selected as UserStatusType);
 			reset();
 			hide();
 		},
 		[hide, reset],
 	);
 
-	useEffect(() => onChange(status), [status, onChange]);
+	useEffect(() => {
+		onChange(status);
+	}, [status, onChange]);
 
 	return (
 		<>
@@ -87,6 +91,7 @@ const UserStatusMenu = ({
 				onKeyUp={handleKeyUp}
 				onKeyDown={handleKeyDown}
 				margin={margin}
+				aria-label={t('User_status_menu')}
 			>
 				<UserStatus status={status} />
 			</Button>

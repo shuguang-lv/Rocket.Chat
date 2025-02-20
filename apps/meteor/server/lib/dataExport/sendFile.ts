@@ -1,18 +1,18 @@
-import path, { join } from 'path';
 import { mkdir, mkdtemp } from 'fs/promises';
 import { tmpdir } from 'os';
+import path, { join } from 'path';
 
 import type { IUser } from '@rocket.chat/core-typings';
 
 import { getURL } from '../../../app/utils/server/getURL';
-import { getPath } from './getPath';
-import { copyFileUpload } from './copyFileUpload';
-import { getRoomData } from './getRoomData';
-import { exportRoomMessagesToFile } from './exportRoomMessagesToFile';
-import { makeZipFile } from './makeZipFile';
-import { uploadZipFile } from './uploadZipFile';
-import { sendEmail } from './sendEmail';
 import { i18n } from '../i18n';
+import { copyFileUpload } from './copyFileUpload';
+import { exportRoomMessagesToFile } from './exportRoomMessagesToFile';
+import { getPath } from './getPath';
+import { getRoomData } from './getRoomData';
+import { makeZipFile } from './makeZipFile';
+import { sendEmail } from './sendEmail';
+import { uploadZipFile } from './uploadZipFile';
 
 type ExportFile = {
 	rid: string;
@@ -48,7 +48,7 @@ export const sendFile = async (data: ExportFile, user: IUser): Promise<void> => 
 						...(data.dateFrom && { $gte: data.dateFrom }),
 						...(data.dateTo && { $lte: data.dateTo }),
 					},
-			  };
+				};
 
 	const exportMessages = async (): Promise<void> => {
 		const { fileList } = await exportRoomMessagesToFile(exportPath, assetsPath, exportType, roomsToExport, user, filter, {}, false);
@@ -64,9 +64,11 @@ export const sendFile = async (data: ExportFile, user: IUser): Promise<void> => 
 
 	await exportMessages();
 
+	const promises: Promise<void>[] = [];
 	for await (const attachmentData of fullFileList) {
-		await copyFileUpload(attachmentData, assetsPath);
+		promises.push(copyFileUpload(attachmentData, assetsPath));
 	}
+	await Promise.all(promises);
 
 	const exportFile = `${baseDir}-export.zip`;
 	await makeZipFile(exportPath, exportFile);

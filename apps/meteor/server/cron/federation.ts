@@ -1,12 +1,13 @@
 import type { SettingValue } from '@rocket.chat/core-typings';
-import { Users, Settings } from '@rocket.chat/models';
 import { eventTypes } from '@rocket.chat/core-typings';
 import { cronJobs } from '@rocket.chat/cron';
+import { Users, Settings } from '@rocket.chat/models';
 
 import { resolveSRV, resolveTXT } from '../../app/federation/server/functions/resolveDNS';
-import { settings, settingsRegistry } from '../../app/settings/server';
 import { dispatchEvent } from '../../app/federation/server/handler';
 import { getFederationDomain } from '../../app/federation/server/lib/getFederationDomain';
+import { notifyOnSettingChangedById } from '../../app/lib/server/lib/notifyListener';
+import { settings, settingsRegistry } from '../../app/settings/server';
 
 async function updateSetting(id: string, value: SettingValue | null): Promise<void> {
 	if (value !== null) {
@@ -15,7 +16,8 @@ async function updateSetting(id: string, value: SettingValue | null): Promise<vo
 		if (setting === undefined) {
 			await settingsRegistry.add(id, value);
 		} else {
-			await Settings.updateValueById(id, value);
+			// TODO: audit
+			(await Settings.updateValueById(id, value)).modifiedCount && void notifyOnSettingChangedById(id);
 		}
 	} else {
 		await Settings.updateValueById(id, null);
@@ -76,8 +78,7 @@ async function runFederation(): Promise<void> {
 	}
 }
 
-// eslint-disable-next-line @typescript-eslint/naming-convention
-export async function federationCron(): Promise<void> {
+export function federationCron(): void {
 	const name = 'Federation';
 
 	settings.watch('FEDERATION_Enabled', async (value) => {

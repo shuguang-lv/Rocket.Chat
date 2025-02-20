@@ -1,14 +1,15 @@
-import { Meteor } from 'meteor/meteor';
-import { Match } from 'meteor/check';
-import { Rooms, Subscriptions } from '@rocket.chat/models';
 import { Message } from '@rocket.chat/core-services';
 import type { IRoom, IUser } from '@rocket.chat/core-typings';
+import { Rooms, Subscriptions } from '@rocket.chat/models';
+import { Match } from 'meteor/check';
+import { Meteor } from 'meteor/meteor';
 import type { UpdateResult, Document } from 'mongodb';
 
-import { settings } from '../../../settings/server';
-import { roomCoordinator } from '../../../../server/lib/rooms/roomCoordinator';
 import { RoomSettingsEnum } from '../../../../definition/IRoomTypeConfig';
 import { i18n } from '../../../../server/lib/i18n';
+import { roomCoordinator } from '../../../../server/lib/rooms/roomCoordinator';
+import { notifyOnSubscriptionChangedByRoomId } from '../../../lib/server/lib/notifyListener';
+import { settings } from '../../../settings/server';
 
 export const saveRoomType = async function (
 	rid: string,
@@ -41,9 +42,14 @@ export const saveRoomType = async function (
 		});
 	}
 
-	const result = (await Rooms.setTypeById(rid, roomType)) && (await Subscriptions.updateTypeByRoomId(rid, roomType));
+	const result = await Promise.all([Rooms.setTypeById(rid, roomType), Subscriptions.updateTypeByRoomId(rid, roomType)]);
+
 	if (!result) {
 		return result;
+	}
+
+	if (result[1]?.modifiedCount) {
+		void notifyOnSubscriptionChangedByRoomId(rid);
 	}
 
 	if (sendMessage) {
@@ -59,5 +65,6 @@ export const saveRoomType = async function (
 		}
 		await Message.saveSystemMessage('room_changed_privacy', rid, message, user);
 	}
+
 	return result;
 };

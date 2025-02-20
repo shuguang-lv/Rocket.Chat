@@ -1,13 +1,15 @@
-import { Meteor } from 'meteor/meteor';
-import { Match, check } from 'meteor/check';
 import type { INewOutgoingIntegration, IOutgoingIntegration } from '@rocket.chat/core-typings';
+import type { ServerMethods } from '@rocket.chat/ddp-client';
 import { Integrations } from '@rocket.chat/models';
-import type { ServerMethods } from '@rocket.chat/ui-contexts';
+import { Match, check } from 'meteor/check';
+import { Meteor } from 'meteor/meteor';
 
 import { hasPermissionAsync } from '../../../../authorization/server/functions/hasPermission';
+import { notifyOnIntegrationChanged } from '../../../../lib/server/lib/notifyListener';
 import { validateOutgoingIntegration } from '../../lib/validateOutgoingIntegration';
+import { validateScriptEngine } from '../../lib/validateScriptEngine';
 
-declare module '@rocket.chat/ui-contexts' {
+declare module '@rocket.chat/ddp-client' {
 	// eslint-disable-next-line @typescript-eslint/naming-convention
 	interface ServerMethods {
 		addOutgoingIntegration(integration: INewOutgoingIntegration): Promise<IOutgoingIntegration>;
@@ -27,6 +29,7 @@ export const addOutgoingIntegration = async (userId: string, integration: INewOu
 			emoji: Match.Maybe(String),
 			scriptEnabled: Boolean,
 			script: Match.Maybe(String),
+			scriptEngine: Match.Maybe(String),
 			urls: Match.Maybe([String]),
 			event: Match.Maybe(String),
 			triggerWords: Match.Maybe([String]),
@@ -50,10 +53,19 @@ export const addOutgoingIntegration = async (userId: string, integration: INewOu
 		throw new Meteor.Error('not_authorized');
 	}
 
+	if (integration.script?.trim()) {
+		validateScriptEngine(integration.scriptEngine ?? 'isolated-vm');
+	}
+
 	const integrationData = await validateOutgoingIntegration(integration, userId);
 
-	const result = await Integrations.insertOne(integrationData);
-	integrationData._id = result.insertedId;
+	const { insertedId } = await Integrations.insertOne(integrationData);
+
+	if (insertedId) {
+		void notifyOnIntegrationChanged({ ...integrationData, _id: insertedId }, 'inserted');
+	}
+
+	integrationData._id = insertedId;
 
 	return integrationData;
 };

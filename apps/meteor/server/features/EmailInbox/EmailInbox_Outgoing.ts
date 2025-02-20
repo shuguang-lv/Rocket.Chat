@@ -1,17 +1,18 @@
-import type Mail from 'nodemailer/lib/mailer';
-import { Match } from 'meteor/check';
 import { isIMessageInbox } from '@rocket.chat/core-typings';
-import type { IEmailInbox, IUser, IMessage, IOmnichannelRoom, SlashCommandCallbackParams } from '@rocket.chat/core-typings';
+import type { IEmailInbox, IUser, IOmnichannelRoom, SlashCommandCallbackParams } from '@rocket.chat/core-typings';
 import { Messages, Uploads, LivechatRooms, Rooms, Users } from '@rocket.chat/models';
+import { Match } from 'meteor/check';
+import type Mail from 'nodemailer/lib/mailer';
 
-import { callbacks } from '../../../lib/callbacks';
-import { FileUpload } from '../../../app/file-upload/server';
-import { slashCommands } from '../../../app/utils/server';
-import type { Inbox } from './EmailInbox';
 import { inboxes } from './EmailInbox';
-import { sendMessage } from '../../../app/lib/server/functions/sendMessage';
-import { settings } from '../../../app/settings/server';
+import type { Inbox } from './EmailInbox';
 import { logger } from './logger';
+import { FileUpload } from '../../../app/file-upload/server';
+import { sendMessage } from '../../../app/lib/server/functions/sendMessage';
+import { notifyOnMessageChange } from '../../../app/lib/server/lib/notifyListener';
+import { settings } from '../../../app/settings/server';
+import { slashCommands } from '../../../app/utils/server/slashCommand';
+import { callbacks } from '../../../lib/callbacks';
 import { i18n } from '../../lib/i18n';
 
 const livechatQuoteRegExp = /^\[\s\]\(https?:\/\/.+\/live\/.+\?msg=(?<id>.+?)\)\s(?<text>.+)/s;
@@ -19,7 +20,7 @@ const livechatQuoteRegExp = /^\[\s\]\(https?:\/\/.+\/live\/.+\?msg=(?<id>.+?)\)\
 const getRocketCatUser = async (): Promise<IUser | null> => Users.findOneById('rocket.cat');
 
 const language = settings.get<string>('Language') || 'en';
-const t = (s: string): string => i18n.t(s, { lng: language });
+const t = i18n.getFixedT(language);
 
 // TODO: change these messages with room notifications
 const sendErrorReplyMessage = async (error: string, options: any) => {
@@ -43,15 +44,15 @@ const sendErrorReplyMessage = async (error: string, options: any) => {
 	return sendMessage(user, message, { _id: options.rid });
 };
 
-const sendSuccessReplyMessage = async (options: any) => {
-	if (!options?.rid || !options?.msgId) {
+const sendSuccessReplyMessage = async (options: { room: IOmnichannelRoom; msgId: string; sender: string }) => {
+	if (!options?.room?._id || !options?.msgId) {
 		return;
 	}
 	const message = {
 		groupable: false,
 		msg: `@${options.sender} Attachment was sent successfully`,
 		_id: String(Date.now()),
-		rid: options.rid,
+		rid: options.room._id,
 		ts: new Date(),
 	};
 
@@ -60,7 +61,7 @@ const sendSuccessReplyMessage = async (options: any) => {
 		return;
 	}
 
-	return sendMessage(user, message, { _id: options.rid });
+	return sendMessage(user, message, options.room);
 };
 
 async function sendEmail(inbox: Inbox, mail: Mail.Options, options?: any): Promise<{ messageId: string }> {
@@ -70,12 +71,12 @@ async function sendEmail(inbox: Inbox, mail: Mail.Options, options?: any): Promi
 				? {
 						name: inbox.config.senderInfo,
 						address: inbox.config.email,
-				  }
+					}
 				: inbox.config.email,
 			...mail,
 		})
 		.then((info) => {
-			logger.info('Message sent: %s', info.messageId);
+			logger.info({ msg: 'Message sent', info });
 			return info;
 		})
 		.catch(async (err) => {
@@ -92,7 +93,6 @@ async function sendEmail(inbox: Inbox, mail: Mail.Options, options?: any): Promi
 slashCommands.add({
 	command: 'sendEmailAttachment',
 	callback: async ({ command, params }: SlashCommandCallbackParams<'sendEmailAttachment'>) => {
-		logger.debug('sendEmailAttachment command: ', command, params);
 		if (command !== 'sendEmailAttachment' || !Match.test(params, String)) {
 			return;
 		}
@@ -171,11 +171,14 @@ slashCommands.add({
 				},
 			},
 		);
+		void notifyOnMessageChange({
+			id: message._id,
+		});
 
 		return sendSuccessReplyMessage({
 			msgId: message._id,
 			sender: message.u.username,
-			rid: room._id,
+			room,
 		});
 	},
 	options: {
@@ -187,7 +190,9 @@ slashCommands.add({
 
 callbacks.add(
 	'afterSaveMessage',
-	async function (message: IMessage, room: any) {
+	async (message, { room: omnichannelRoom }) => {
+		const room = omnichannelRoom as IOmnichannelRoom;
+
 		if (!room?.email?.inbox) {
 			return message;
 		}
@@ -318,7 +323,6 @@ export async function sendTestEmailToInbox(emailInboxRecord: IEmailInbox, user: 
 		throw new Error('user-without-verified-email');
 	}
 
-	logger.info(`Sending testing email to ${address}`);
 	void sendEmail(inbox, {
 		to: address,
 		subject: 'Test of inbox configuration',

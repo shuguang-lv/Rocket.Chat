@@ -1,34 +1,36 @@
-import type { IDiscussionMessage, IRoom } from '@rocket.chat/core-typings';
+import type { IDiscussionMessage } from '@rocket.chat/core-typings';
 import { useDebouncedValue } from '@rocket.chat/fuselage-hooks';
 import { useUserId } from '@rocket.chat/ui-contexts';
-import type { ReactElement } from 'react';
-import React, { useCallback, useMemo, useState } from 'react';
+import type { ChangeEvent, ReactElement } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
-import { useRecordList } from '../../../../hooks/lists/useRecordList';
-import { AsyncStatePhase } from '../../../../hooks/useAsyncState';
-import { useTabBarClose } from '../../contexts/ToolboxContext';
 import DiscussionsList from './DiscussionsList';
 import { useDiscussionsList } from './useDiscussionsList';
+import { useRecordList } from '../../../../hooks/lists/useRecordList';
+import { AsyncStatePhase } from '../../../../hooks/useAsyncState';
+import { useRoom } from '../../contexts/RoomContext';
+import { useRoomToolbox } from '../../contexts/RoomToolboxContext';
 
-const DiscussionListContextBar = ({ rid }: { rid: IRoom['_id'] }): ReactElement | null => {
+const DiscussionListContextBar = (): ReactElement | null => {
 	const userId = useUserId();
-	const onClose = useTabBarClose();
+	const room = useRoom();
+	const { closeTab } = useRoomToolbox();
 
 	const [text, setText] = useState('');
 	const debouncedText = useDebouncedValue(text, 400);
 
 	const options = useMemo(
 		() => ({
-			rid,
+			rid: room._id,
 			text: debouncedText,
 		}),
-		[rid, debouncedText],
+		[room._id, debouncedText],
 	);
 
 	const { discussionsList, loadMoreItems } = useDiscussionsList(options, userId);
 	const { phase, error, items: discussions, itemCount: totalItemCount } = useRecordList<IDiscussionMessage>(discussionsList);
 
-	const handleTextChange = useCallback((e) => {
+	const handleTextChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
 		setText(e.currentTarget.value);
 	}, []);
 
@@ -38,8 +40,7 @@ const DiscussionListContextBar = ({ rid }: { rid: IRoom['_id'] }): ReactElement 
 
 	return (
 		<DiscussionsList
-			onClose={onClose}
-			userId={userId}
+			onClose={closeTab}
 			error={error}
 			discussions={discussions}
 			total={totalItemCount}

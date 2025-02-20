@@ -1,20 +1,21 @@
 import http from 'http';
 
-import client from 'prom-client';
+import { Statistics } from '@rocket.chat/models';
+import { tracerSpan } from '@rocket.chat/tracing';
 import connect from 'connect';
-import _ from 'underscore';
-import gcStats from 'prometheus-gc-stats';
+import { Facts } from 'meteor/facts-base';
 import { Meteor } from 'meteor/meteor';
 import { MongoInternals } from 'meteor/mongo';
-import { Facts } from 'meteor/facts-base';
-import { Statistics } from '@rocket.chat/models';
+import client from 'prom-client';
+import gcStats from 'prometheus-gc-stats';
+import _ from 'underscore';
 
-import { Info } from '../../../utils/server';
+import { metrics } from './metrics';
+import { SystemLogger } from '../../../../server/lib/logger/system';
 import { getControl } from '../../../../server/lib/migrations';
 import { settings } from '../../../settings/server';
-import { SystemLogger } from '../../../../server/lib/logger/system';
-import { metrics } from './metrics';
 import { getAppsStatistics } from '../../../statistics/server/lib/getAppsStatistics';
+import { Info } from '../../../utils/rocketchat.info';
 
 const { mongo } = MongoInternals.defaultRemoteCollectionDriver();
 
@@ -39,7 +40,7 @@ const setPrometheusData = async (): Promise<void> => {
 	metrics.ddpConnectedUsers.set(_.unique(authenticatedSessions.map((s) => s.userId)).length);
 
 	// Apps metrics
-	const { totalInstalled, totalActive, totalFailed } = getAppsStatistics();
+	const { totalInstalled, totalActive, totalFailed } = await getAppsStatistics();
 
 	metrics.totalAppsInstalled.set(totalInstalled || 0);
 	metrics.totalAppsEnabled.set(totalActive || 0);
@@ -169,23 +170,29 @@ const updatePrometheusConfig = async (): Promise<void> => {
 			host: process.env.BIND_IP || '0.0.0.0',
 		});
 
-		timer = setInterval(setPrometheusData, 5000);
+		timer = setInterval(async () => {
+			void tracerSpan(
+				'setPrometheusData',
+				{
+					attributes: {
+						port: is.port,
+						host: process.env.BIND_IP || '0.0.0.0',
+					},
+				},
+				() => {
+					void setPrometheusData();
+				},
+			);
+		}, 5000);
 	}
 
 	clearInterval(resetTimer);
 	if (is.resetInterval) {
 		resetTimer = setInterval(() => {
-			client.register
-				.getMetricsAsArray()
-				.then((metrics) => {
-					metrics.forEach((metric) => {
-						// @ts-expect-error Property 'hashMap' does not exist on type 'metric'.
-						metric.hashMap = {};
-					});
-				})
-				.catch((err) => {
-					SystemLogger.error({ msg: 'Error while collecting metrics', err });
-				});
+			client.register.getMetricsAsArray().forEach((metric) => {
+				// @ts-expect-error Property 'hashMap' does not exist on type 'metric'.
+				metric.hashMap = {};
+			});
 		}, is.resetInterval);
 	}
 

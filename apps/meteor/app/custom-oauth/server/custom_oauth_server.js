@@ -1,17 +1,20 @@
-import { Meteor } from 'meteor/meteor';
-import { Match, check } from 'meteor/check';
+import { LDAP } from '@rocket.chat/core-services';
+import { Logger } from '@rocket.chat/logger';
+import { Users } from '@rocket.chat/models';
+import { serverFetch as fetch } from '@rocket.chat/server-fetch';
 import { Accounts } from 'meteor/accounts-base';
+import { Match, check } from 'meteor/check';
+import { Meteor } from 'meteor/meteor';
 import { OAuth } from 'meteor/oauth';
 import { ServiceConfiguration } from 'meteor/service-configuration';
 import _ from 'underscore';
-import { Users } from '@rocket.chat/models';
-import { serverFetch as fetch } from '@rocket.chat/server-fetch';
 
 import { normalizers, fromTemplate, renameInvalidProperties } from './transform_helpers';
-import { Logger } from '../../logger/server';
-import { isURL } from '../../../lib/utils/isURL';
-import { registerAccessTokenService } from '../../lib/server/oauth/oauth';
 import { callbacks } from '../../../lib/callbacks';
+import { isURL } from '../../../lib/utils/isURL';
+import { notifyOnUserChange } from '../../lib/server/lib/notifyListener';
+import { registerAccessTokenService } from '../../lib/server/oauth/oauth';
+import { settings } from '../../settings/server';
 
 const logger = new Logger('CustomOAuth');
 
@@ -79,6 +82,7 @@ export class CustomOAuth {
 		this.nameField = (options.nameField || '').trim();
 		this.avatarField = (options.avatarField || '').trim();
 		this.mergeUsers = options.mergeUsers;
+		this.mergeUsersDistinctServices = options.mergeUsersDistinctServices;
 		this.rolesClaim = options.rolesClaim || 'roles';
 		this.accessTokenParam = options.accessTokenParam;
 		this.channelsAdmin = options.channelsAdmin || 'rocket.cat';
@@ -103,7 +107,7 @@ export class CustomOAuth {
 	async getAccessToken(query) {
 		const config = await ServiceConfiguration.configurations.findOneAsync({ service: this.name });
 		if (!config) {
-			throw new ServiceConfiguration.ConfigError();
+			throw new Accounts.ConfigError();
 		}
 
 		let response = undefined;
@@ -133,7 +137,7 @@ export class CustomOAuth {
 			const request = await fetch(`${this.tokenPath}`, {
 				method: 'POST',
 				headers,
-				params,
+				body: params,
 			});
 
 			if (!request.ok) {
@@ -331,9 +335,13 @@ export class CustomOAuth {
 				let user = undefined;
 
 				if (this.keyField === 'username') {
-					user = await Users.findOneByUsernameAndServiceNameIgnoringCase(serviceData.username, serviceData._id, serviceName);
+					user = this.mergeUsersDistinctServices
+						? await Users.findOneByUsernameIgnoringCase(serviceData.username)
+						: await Users.findOneByUsernameAndServiceNameIgnoringCase(serviceData.username, serviceData.id, serviceName);
 				} else if (this.keyField === 'email') {
-					user = await Users.findOneByEmailAddressAndServiceNameIgnoringCase(serviceData.email, serviceData._id, serviceName);
+					user = this.mergeUsersDistinctServices
+						? await Users.findOneByEmailAddress(serviceData.email)
+						: await Users.findOneByEmailAddressAndServiceNameIgnoringCase(serviceData.email, serviceData.id, serviceName);
 				}
 
 				if (!user) {
@@ -348,7 +356,7 @@ export class CustomOAuth {
 					user.services[serviceName] &&
 					user.services[serviceName].id === serviceData.id &&
 					user.name === serviceData.name &&
-					(this.keyField === 'email' || user.emails?.find(({ address }) => address === serviceData.email))
+					(this.keyField === 'email' || !serviceData.email || user.emails?.find(({ address }) => address === serviceData.email))
 				) {
 					return;
 				}
@@ -367,6 +375,8 @@ export class CustomOAuth {
 				};
 
 				await Users.update({ _id: user._id }, update);
+
+				void notifyOnUserChange({ clientAction: 'updated', id: user._id, diff: update });
 			}
 		});
 
@@ -395,7 +405,7 @@ export class CustomOAuth {
 		const self = this;
 		const whitelisted = ['id', 'email', 'username', 'name', this.rolesClaim];
 
-		registerAccessTokenService(name, async function (options) {
+		registerAccessTokenService(name, async (options) => {
 			check(
 				options,
 				Match.ObjectIncluding({
@@ -427,7 +437,8 @@ export class CustomOAuth {
 }
 
 const { updateOrCreateUserFromExternalService } = Accounts;
-const updateOrCreateUserFromExternalServiceAsync = async function (...args /* serviceName, serviceData, options*/) {
+
+Accounts.updateOrCreateUserFromExternalService = async function (...args /* serviceName, serviceData, options*/) {
 	for await (const hook of BeforeUpdateOrCreateUserFromExternalService) {
 		await hook.apply(this, args);
 	}
@@ -435,16 +446,16 @@ const updateOrCreateUserFromExternalServiceAsync = async function (...args /* se
 	const [serviceName, serviceData] = args;
 
 	const user = updateOrCreateUserFromExternalService.apply(this, args);
+	const fullUser = await Users.findOneById(user.userId);
+	if (settings.get('LDAP_Update_Data_On_OAuth_Login')) {
+		await LDAP.loginAuthenticatedUserRequest(fullUser.username);
+	}
 
 	await callbacks.run('afterValidateNewOAuthUser', {
 		identity: serviceData,
 		serviceName,
-		user: await Users.findOneById(user.userId),
+		user: fullUser,
 	});
 
 	return user;
-};
-
-Accounts.updateOrCreateUserFromExternalService = function (...args /* serviceName, serviceData, options*/) {
-	return Promise.await(updateOrCreateUserFromExternalServiceAsync.call(this, ...args));
 };

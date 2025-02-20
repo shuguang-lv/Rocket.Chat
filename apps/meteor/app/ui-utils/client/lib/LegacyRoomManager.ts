@@ -1,17 +1,16 @@
+import type { IMessage, IRoom } from '@rocket.chat/core-typings';
+import type { Mongo } from 'meteor/mongo';
 import { ReactiveVar } from 'meteor/reactive-var';
 import { Tracker } from 'meteor/tracker';
-import { FlowRouter } from 'meteor/kadira:flow-router';
-import type { IMessage, IRoom } from '@rocket.chat/core-typings';
 
-import { fireGlobalEvent } from '../../../../client/lib/utils/fireGlobalEvent';
 import { upsertMessage, RoomHistoryManager } from './RoomHistoryManager';
 import { mainReady } from './mainReady';
-import { callbacks } from '../../../../lib/callbacks';
-import { CachedChatRoom, ChatMessage, ChatSubscription, CachedChatSubscription, ChatRoom } from '../../../models/client';
-import { getConfig } from '../../../../client/lib/utils/getConfig';
 import { RoomManager } from '../../../../client/lib/RoomManager';
 import { roomCoordinator } from '../../../../client/lib/rooms/roomCoordinator';
-import { Notifications } from '../../../notifications/client';
+import { fireGlobalEvent } from '../../../../client/lib/utils/fireGlobalEvent';
+import { getConfig } from '../../../../client/lib/utils/getConfig';
+import { callbacks } from '../../../../lib/callbacks';
+import { Messages, Subscriptions, CachedChatSubscription } from '../../../models/client';
 import { sdk } from '../../../utils/client/lib/SDKClient';
 
 const maxRoomsOpen = parseInt(getConfig('maxRoomsOpen') ?? '5') || 5;
@@ -37,8 +36,8 @@ function close(typeName: string) {
 	if (openedRooms[typeName]) {
 		if (openedRooms[typeName].rid) {
 			sdk.stop('room-messages', openedRooms[typeName].rid);
-			Notifications.unRoom(openedRooms[typeName].rid, 'deleteMessage');
-			Notifications.unRoom(openedRooms[typeName].rid, 'deleteMessageBulk');
+			sdk.stop('notify-room', `${openedRooms[typeName].rid}/deleteMessage`);
+			sdk.stop('notify-room', `${openedRooms[typeName].rid}/deleteMessageBulk`);
 		}
 
 		openedRooms[typeName].ready = false;
@@ -79,46 +78,13 @@ function getOpenedRoomByRid(rid: IRoom['_id']) {
 		.find((openedRoom) => openedRoom.rid === rid);
 }
 
-const handleTrackSettingsChange = (msg: IMessage) => {
-	const openedRoom = RoomManager.opened;
-	if (openedRoom !== msg.rid) {
-		return;
-	}
-
-	void Tracker.nonreactive(async () => {
-		if (msg.t === 'room_changed_privacy') {
-			const type = FlowRouter.current().route?.name === 'channel' ? 'c' : 'p';
-			await close(type + FlowRouter.getParam('name'));
-
-			const subscription = ChatSubscription.findOne({ rid: msg.rid });
-			if (!subscription) {
-				throw new Error('Subscription not found');
-			}
-			const route = subscription.t === 'c' ? 'channel' : 'group';
-			FlowRouter.go(route, { name: subscription.name }, FlowRouter.current().queryParams);
-		}
-
-		if (msg.t === 'r') {
-			const room = ChatRoom.findOne(msg.rid);
-			if (!room) {
-				throw new Error('Room not found');
-			}
-			if (room.name !== FlowRouter.getParam('name')) {
-				await close(room.t + FlowRouter.getParam('name'));
-				roomCoordinator.openRouteLink(room.t, room, FlowRouter.current().queryParams);
-			}
-		}
-	});
-};
-
 const computation = Tracker.autorun(() => {
-	const ready = CachedChatRoom.ready.get() && mainReady.get();
-	if (ready !== true) {
+	if (!mainReady.get()) {
 		return;
 	}
 	Tracker.nonreactive(() =>
 		Object.entries(openedRooms).forEach(([typeName, record]) => {
-			if (record.active !== true || record.ready === true) {
+			if (record.active !== true || (record.ready === true && record.streamActive === true)) {
 				return;
 			}
 
@@ -139,16 +105,14 @@ const computation = Tracker.autorun(() => {
 							// }
 							// Do not load command messages into channel
 							if (msg.t !== 'command') {
-								const subscription = ChatSubscription.findOne({ rid: record.rid }, { reactive: false });
-								const isNew = !ChatMessage.findOne({ _id: msg._id, temp: { $ne: true } });
+								const subscription = Subscriptions.findOne({ rid: record.rid }, { reactive: false });
+								const isNew = !Messages.findOne({ _id: msg._id, temp: { $ne: true } });
 								await upsertMessage({ msg, subscription });
 
 								if (isNew) {
 									await callbacks.run('streamNewMessage', msg);
 								}
 							}
-
-							handleTrackSettingsChange({ ...msg });
 
 							await callbacks.run('streamMessage', { ...msg, name: room.name || '' });
 
@@ -167,24 +131,80 @@ const computation = Tracker.autorun(() => {
 							record.streamActive = true;
 							openedRoomsDependency.changed();
 						});
-					Notifications.onRoom(record.rid, 'deleteMessage', (msg) => {
-						ChatMessage.remove({ _id: msg._id });
+
+					// when we receive a messages imported event we just clear the room history and fetch it again
+					sdk.stream('notify-room', [`${record.rid}/messagesImported`], async () => {
+						await RoomHistoryManager.clear(record.rid);
+						await RoomHistoryManager.getMore(record.rid);
+					});
+
+					sdk.stream('notify-room', [`${record.rid}/deleteMessage`], (msg) => {
+						Messages.remove({ _id: msg._id });
 
 						// remove thread refenrece from deleted message
-						ChatMessage.update({ tmid: msg._id }, { $unset: { tmid: 1 } }, { multi: true });
+						Messages.update({ tmid: msg._id }, { $unset: { tmid: 1 } }, { multi: true });
 					});
-					Notifications.onRoom(record.rid, 'deleteMessageBulk', ({ rid, ts, excludePinned, ignoreDiscussion, users }) => {
-						const query: Mongo.Query<IMessage> = { rid, ts };
-						if (excludePinned) {
-							query.pinned = { $ne: true };
+
+					sdk.stream(
+						'notify-room',
+						[`${record.rid}/deleteMessageBulk`],
+						({ rid, ts, excludePinned, ignoreDiscussion, users, ids, showDeletedStatus }) => {
+							const query: Mongo.Selector<IMessage> = { rid };
+
+							if (ids) {
+								query._id = { $in: ids };
+							} else {
+								query.ts = ts;
+							}
+							if (excludePinned) {
+								query.pinned = { $ne: true };
+							}
+							if (ignoreDiscussion) {
+								query.drid = { $exists: false };
+							}
+							if (users?.length) {
+								query['u.username'] = { $in: users };
+							}
+
+							if (showDeletedStatus) {
+								return Messages.update(
+									query,
+									{ $set: { t: 'rm', msg: '', urls: [], mentions: [], attachments: [], reactions: {} } },
+									{ multi: true },
+								);
+							}
+							return Messages.remove(query);
+						},
+					);
+
+					sdk.stream('notify-room', [`${record.rid}/messagesRead`], ({ tmid, until }) => {
+						if (tmid) {
+							return Messages.update(
+								{
+									tmid,
+									unread: true,
+								},
+								{ $unset: { unread: 1 } },
+								{ multi: true },
+							);
 						}
-						if (ignoreDiscussion) {
-							query.drid = { $exists: false };
-						}
-						if (users?.length) {
-							query['u.username'] = { $in: users };
-						}
-						ChatMessage.remove(query);
+						Messages.update(
+							{
+								rid: record.rid,
+								unread: true,
+								ts: { $lt: until },
+								$or: [
+									{
+										tmid: { $exists: false },
+									},
+									{
+										tshow: true,
+									},
+								],
+							},
+							{ $unset: { unread: 1 } },
+							{ multi: true },
+						);
 					});
 				}
 			}

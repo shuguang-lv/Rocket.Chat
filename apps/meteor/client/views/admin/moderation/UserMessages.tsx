@@ -1,110 +1,87 @@
-import { Box, Callout, Message, States, StatesIcon, StatesTitle } from '@rocket.chat/fuselage';
-import { useMutableCallback } from '@rocket.chat/fuselage-hooks';
-import { useEndpoint, useRoute, useToastMessageDispatch, useTranslation } from '@rocket.chat/ui-contexts';
+import { Box, Callout, Message, StatesAction, StatesActions, StatesIcon, StatesTitle } from '@rocket.chat/fuselage';
+import { useEffectEvent } from '@rocket.chat/fuselage-hooks';
+import { useEndpoint } from '@rocket.chat/ui-contexts';
 import { useQuery } from '@tanstack/react-query';
-import React, { useMemo } from 'react';
+import { Fragment } from 'react';
+import { useTranslation } from 'react-i18next';
 
-import VerticalBar from '../../../components/VerticalBar';
-import { useUserDisplayName } from '../../../hooks/useUserDisplayName';
 import MessageContextFooter from './MessageContextFooter';
 import ContextMessage from './helpers/ContextMessage';
+import { ContextualbarFooter } from '../../../components/Contextualbar';
+import GenericNoResults from '../../../components/GenericNoResults';
 
-const UserMessages = ({ userId, onRedirect }: { userId: string; onRedirect: (mid: string) => void }): JSX.Element => {
-	const t = useTranslation();
-
-	const moderationRoute = useRoute('moderation-console');
-
+const UserMessages = ({ userId, onRedirect }: { userId: string; onRedirect: (mid: string) => void }) => {
+	const { t } = useTranslation();
 	const getUserMessages = useEndpoint('GET', '/v1/moderation.user.reportedMessages');
 
-	const dispatchToastMessage = useToastMessageDispatch();
-
 	const {
-		data: userMessages,
+		data: report,
 		refetch: reloadUserMessages,
-		isLoading: isLoadingUserMessages,
-		isSuccess: isSuccessUserMessages,
-	} = useQuery(
-		['moderation.userMessages', { userId }],
-		async () => {
+		isLoading,
+		isSuccess,
+		isError,
+	} = useQuery({
+		queryKey: ['moderation', 'msgReports', 'fetchDetails', { userId }],
+		queryFn: async () => {
 			const messages = await getUserMessages({ userId });
 			return messages;
 		},
-		{
-			onError: (error) => {
-				dispatchToastMessage({ type: 'error', message: error });
-			},
+		meta: {
+			apiErrorToastMessage: true,
 		},
-	);
-
-	// opens up the 'reports' tab when the user clicks on a user in the 'users' tab
-
-	const handleClick = useMutableCallback((id): void => {
-		moderationRoute.push({
-			context: 'reports',
-			id,
-		});
 	});
 
-	const handleChange = useMutableCallback(() => {
+	const handleChange = useEffectEvent(() => {
 		reloadUserMessages();
 	});
 
-	const username = useMemo(() => {
-		if (userMessages?.messages[0]?.message?.u?.username) {
-			return userMessages?.messages[0].message.u.username;
-		}
-		return '';
-	}, [userMessages?.messages]);
-
-	const name = useMemo(() => {
-		if (userMessages?.messages[0]?.message?.u?.name) {
-			return userMessages?.messages[0].message.u.name;
-		}
-		return '';
-	}, [userMessages?.messages]);
-
-	const displayName =
-		useUserDisplayName({
-			name,
-			username,
-		}) || userId;
-
 	return (
 		<>
-			<VerticalBar.Header>
-				<VerticalBar.Text>{t('Moderation_Message_context_header', { displayName })}</VerticalBar.Text>
-				<VerticalBar.Close onClick={() => moderationRoute.push({})} />
-			</VerticalBar.Header>
 			<Box display='flex' flexDirection='column' width='full' height='full' overflowY='auto' overflowX='hidden'>
-				{isSuccessUserMessages && userMessages.messages.length > 0 && (
-					<Callout margin={15} title={t('Moderation_Duplicate_messages')} type='warning' icon='warning'>
-						{t('Moderation_Duplicate_messages_warning')}
-					</Callout>
-				)}{' '}
-				{isLoadingUserMessages && <Message>{t('Loading')}</Message>}
-				{isSuccessUserMessages &&
-					userMessages.messages.length > 0 &&
-					userMessages.messages.map((message) => (
-						<Box key={message._id}>
+				{isLoading && <Message>{t('Loading')}</Message>}
+				{isSuccess && (
+					<Box padding={24}>
+						{report.messages.length > 0 && (
+							<Callout title={t('Moderation_Duplicate_messages')} type='warning' icon='warning'>
+								{t('Moderation_Duplicate_messages_warning')}
+							</Callout>
+						)}
+						{!report.user && (
+							<Callout mbs={8} type='warning' icon='warning'>
+								{t('Moderation_User_deleted_warning')}
+							</Callout>
+						)}
+					</Box>
+				)}
+				{isSuccess &&
+					report.messages.length > 0 &&
+					report.messages.map((message) => (
+						<Fragment key={message._id}>
 							<ContextMessage
 								message={message.message}
 								room={message.room}
-								handleClick={handleClick}
 								onRedirect={onRedirect}
 								onChange={handleChange}
+								deleted={!report.user}
 							/>
-						</Box>
+						</Fragment>
 					))}
-				{isSuccessUserMessages && userMessages.messages.length === 0 && (
-					<States>
-						<StatesIcon name='magnifier' />
-						<StatesTitle>{t('No_results_found')}</StatesTitle>
-					</States>
+				{isSuccess && report.messages.length === 0 && <GenericNoResults title={t('No_message_reports')} icon='message' />}
+				{isError && (
+					<Box display='flex' flexDirection='column' alignItems='center' pb={20} color='default'>
+						<StatesIcon name='warning' variation='danger' />
+						<StatesTitle>{t('Something_went_wrong')}</StatesTitle>
+						<StatesActions>
+							<StatesAction onClick={handleChange}>{t('Reload_page')}</StatesAction>
+						</StatesActions>
+					</Box>
 				)}
 			</Box>
-			<VerticalBar.Footer display='flex'>
-				{isSuccessUserMessages && userMessages.messages.length > 0 && <MessageContextFooter userId={userId} />}
-			</VerticalBar.Footer>
+			{isSuccess && report.messages.length > 0 && (
+				<ContextualbarFooter>
+					<MessageContextFooter userId={userId} deleted={!report.user} />
+				</ContextualbarFooter>
+			)}
 		</>
 	);
 };

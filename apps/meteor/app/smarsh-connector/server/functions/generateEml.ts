@@ -1,12 +1,11 @@
-import { Meteor } from 'meteor/meteor';
-import moment from 'moment';
 import { Messages, SmarshHistory, Users, Rooms } from '@rocket.chat/models';
+import { Meteor } from 'meteor/meteor';
+import moment from 'moment-timezone';
 
+import { sendEmail } from './sendEmail';
+import { i18n } from '../../../../server/lib/i18n';
 import { settings } from '../../../settings/server';
 import { MessageTypes } from '../../../ui-utils/server';
-import 'moment-timezone';
-import { i18n } from '../../../../server/lib/i18n';
-import { sendEmail } from './sendEmail';
 
 const start =
 	'<table style="width: 100%; border: 1px solid; border-collapse: collapse; table-layout: fixed; margin-top: 10px; font-size: 12px; word-break: break-word;"><tbody>';
@@ -90,7 +89,12 @@ export const generateEml = async (): Promise<void> => {
 				if (message.t) {
 					const messageType = MessageTypes.getType(message);
 					if (messageType) {
-						rows.push(i18n.t(messageType.message, messageType.data ? messageType.data(message) : {}, 'en'));
+						rows.push(
+							i18n.t(messageType.message, {
+								lng: 'en',
+								replace: messageType.data ? messageType.data(message) : {},
+							}),
+						);
 					} else {
 						rows.push(`${message.msg} (${message.t})`);
 					}

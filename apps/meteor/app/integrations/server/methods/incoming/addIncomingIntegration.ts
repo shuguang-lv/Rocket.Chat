@@ -1,17 +1,20 @@
-import { Meteor } from 'meteor/meteor';
-import { Match, check } from 'meteor/check';
+import type { INewIncomingIntegration, IIncomingIntegration } from '@rocket.chat/core-typings';
+import type { ServerMethods } from '@rocket.chat/ddp-client';
+import { Integrations, Subscriptions, Users, Rooms } from '@rocket.chat/models';
 import { Random } from '@rocket.chat/random';
 import { Babel } from 'meteor/babel-compiler';
+import { Match, check } from 'meteor/check';
+import { Meteor } from 'meteor/meteor';
 import _ from 'underscore';
-import type { INewIncomingIntegration, IIncomingIntegration } from '@rocket.chat/core-typings';
-import { Integrations, Roles, Subscriptions, Users, Rooms } from '@rocket.chat/models';
-import type { ServerMethods } from '@rocket.chat/ui-contexts';
 
+import { addUserRolesAsync } from '../../../../../server/lib/roles/addUserRoles';
 import { hasPermissionAsync, hasAllPermissionAsync } from '../../../../authorization/server/functions/hasPermission';
+import { notifyOnIntegrationChanged } from '../../../../lib/server/lib/notifyListener';
+import { validateScriptEngine, isScriptEngineFrozen } from '../../lib/validateScriptEngine';
 
 const validChannelChars = ['@', '#'];
 
-declare module '@rocket.chat/ui-contexts' {
+declare module '@rocket.chat/ddp-client' {
 	// eslint-disable-next-line @typescript-eslint/naming-convention
 	interface ServerMethods {
 		addIncomingIntegration(integration: INewIncomingIntegration): Promise<IIncomingIntegration>;
@@ -30,6 +33,8 @@ export const addIncomingIntegration = async (userId: string, integration: INewIn
 			alias: Match.Maybe(String),
 			emoji: Match.Maybe(String),
 			scriptEnabled: Boolean,
+			scriptEngine: Match.Maybe(String),
+			overrideDestinationChannelEnabled: Match.Maybe(Boolean),
 			script: Match.Maybe(String),
 			avatar: Match.Maybe(String),
 		}),
@@ -73,6 +78,10 @@ export const addIncomingIntegration = async (userId: string, integration: INewIn
 		});
 	}
 
+	if (integration.script?.trim()) {
+		validateScriptEngine(integration.scriptEngine ?? 'isolated-vm');
+	}
+
 	const user = await Users.findOne({ username: integration.username });
 
 	if (!user) {
@@ -83,15 +92,23 @@ export const addIncomingIntegration = async (userId: string, integration: INewIn
 
 	const integrationData: IIncomingIntegration = {
 		...integration,
+		scriptEngine: integration.scriptEngine ?? 'isolated-vm',
 		type: 'webhook-incoming',
 		channel: channels,
+		overrideDestinationChannelEnabled: integration.overrideDestinationChannelEnabled ?? false,
 		token: Random.id(48),
 		userId: user._id,
 		_createdAt: new Date(),
 		_createdBy: await Users.findOne({ _id: userId }, { projection: { username: 1 } }),
 	};
 
-	if (integration.scriptEnabled === true && integration.script && integration.script.trim() !== '') {
+	// Only compile the script if it is enabled and using a sandbox that is not frozen
+	if (
+		!isScriptEngineFrozen(integrationData.scriptEngine) &&
+		integration.scriptEnabled === true &&
+		integration.script &&
+		integration.script.trim() !== ''
+	) {
 		try {
 			let babelOptions = Babel.getDefaultOptions({ runtime: false });
 			babelOptions = _.extend(babelOptions, { compact: true, minified: true, comments: false });
@@ -138,11 +155,15 @@ export const addIncomingIntegration = async (userId: string, integration: INewIn
 		}
 	}
 
-	await Roles.addUserRoles(user._id, ['bot']);
+	await addUserRolesAsync(user._id, ['bot']);
 
-	const result = await Integrations.insertOne(integrationData);
+	const { insertedId } = await Integrations.insertOne(integrationData);
 
-	integrationData._id = result.insertedId;
+	if (insertedId) {
+		void notifyOnIntegrationChanged({ ...integrationData, _id: insertedId }, 'inserted');
+	}
+
+	integrationData._id = insertedId;
 
 	return integrationData;
 };

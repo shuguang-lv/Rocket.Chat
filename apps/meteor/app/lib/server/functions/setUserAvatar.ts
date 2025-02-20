@@ -1,15 +1,17 @@
-import { Meteor } from 'meteor/meteor';
-import type { IUser } from '@rocket.chat/core-typings';
 import { api } from '@rocket.chat/core-services';
+import type { IUser } from '@rocket.chat/core-typings';
+import type { Updater } from '@rocket.chat/models';
 import { Users } from '@rocket.chat/models';
 import type { Response } from '@rocket.chat/server-fetch';
 import { serverFetch as fetch } from '@rocket.chat/server-fetch';
+import { Meteor } from 'meteor/meteor';
 
+import { checkUrlForSsrf } from './checkUrlForSsrf';
+import { SystemLogger } from '../../../../server/lib/logger/system';
+import { hasPermissionAsync } from '../../../authorization/server/functions/hasPermission';
 import { RocketChatFile } from '../../../file/server';
 import { FileUpload } from '../../../file-upload/server';
-import { SystemLogger } from '../../../../server/lib/logger/system';
 import { settings } from '../../../settings/server';
-import { hasPermissionAsync } from '../../../authorization/server/functions/hasPermission';
 
 export const setAvatarFromServiceWithValidation = async (
 	userId: string,
@@ -65,6 +67,7 @@ export function setUserAvatar(
 	contentType: string,
 	service: 'rest',
 	etag?: string,
+	updater?: Updater<IUser>,
 ): Promise<void>;
 export function setUserAvatar(
 	user: Pick<IUser, '_id' | 'username'>,
@@ -72,6 +75,7 @@ export function setUserAvatar(
 	contentType?: string,
 	service?: 'initials' | 'url' | 'rest' | string,
 	etag?: string,
+	updater?: Updater<IUser>,
 ): Promise<void>;
 export async function setUserAvatar(
 	user: Pick<IUser, '_id' | 'username'>,
@@ -79,17 +83,31 @@ export async function setUserAvatar(
 	contentType: string | undefined,
 	service?: 'initials' | 'url' | 'rest' | string,
 	etag?: string,
+	updater?: Updater<IUser>,
 ): Promise<void> {
 	if (service === 'initials') {
-		await Users.setAvatarData(user._id, service, null);
+		if (updater) {
+			updater.set('avatarOrigin', origin);
+		} else {
+			await Users.setAvatarData(user._id, service, null);
+		}
 		return;
 	}
 
 	const { buffer, type } = await (async (): Promise<{ buffer: Buffer; type: string }> => {
 		if (service === 'url' && typeof dataURI === 'string') {
 			let response: Response;
+
+			const isSsrfSafe = await checkUrlForSsrf(dataURI);
+			if (!isSsrfSafe) {
+				throw new Meteor.Error('error-avatar-invalid-url', `Invalid avatar URL: ${encodeURI(dataURI)}`, {
+					function: 'setUserAvatar',
+					url: dataURI,
+				});
+			}
+
 			try {
-				response = await fetch(dataURI);
+				response = await fetch(dataURI, { redirect: 'error' });
 			} catch (e) {
 				SystemLogger.info(`Not a valid response, from the avatar url: ${encodeURI(dataURI)}`);
 				throw new Meteor.Error('error-avatar-invalid-url', `Invalid avatar URL: ${encodeURI(dataURI)}`, {
@@ -139,7 +157,7 @@ export async function setUserAvatar(
 			}
 
 			return {
-				buffer: dataURI instanceof Buffer ? dataURI : Buffer.from(dataURI, 'binary'),
+				buffer: typeof dataURI === 'string' ? Buffer.from(dataURI, 'binary') : dataURI,
 				type: contentType,
 			};
 		}
@@ -165,9 +183,15 @@ export async function setUserAvatar(
 
 	const avatarETag = etag || result?.etag || '';
 
-	setTimeout(async function () {
+	setTimeout(async () => {
 		if (service) {
-			await Users.setAvatarData(user._id, service, avatarETag);
+			if (updater) {
+				updater.set('avatarOrigin', origin);
+				updater.set('avatarETag', avatarETag);
+			} else {
+				await Users.setAvatarData(user._id, service, avatarETag);
+			}
+
 			void api.broadcast('user.avatarUpdate', {
 				username: user.username,
 				avatarETag,

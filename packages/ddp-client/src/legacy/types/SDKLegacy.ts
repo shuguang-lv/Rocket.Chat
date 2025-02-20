@@ -1,6 +1,7 @@
-import type { StreamerCallbackArgs } from '@rocket.chat/ui-contexts/src/ServerContext/streams';
 import type { IMessage, Serialized } from '@rocket.chat/core-typings';
 import type { OperationParams, OperationResult } from '@rocket.chat/rest-typings';
+
+import type { StreamerCallbackArgs } from '../../types/streams';
 
 export interface APILegacy {
 	users: {
@@ -81,7 +82,7 @@ export type RocketchatSdkLegacyEvents = {
 	'updateEmojiCustom': StreamerCallbackArgs<'notify-logged', 'updateEmojiCustom'>;
 	'deleteEmojiCustom': StreamerCallbackArgs<'notify-logged', 'deleteEmojiCustom'>;
 	'public-settings-changed': StreamerCallbackArgs<'notify-all', 'public-settings-changed'>;
-	'permissions-changed': StreamerCallbackArgs<'notify-all', 'permissions-changed'>;
+	'permissions-changed': StreamerCallbackArgs<'notify-logged', 'permissions-changed'>;
 	'Users:NameChanged': StreamerCallbackArgs<'notify-logged', 'Users:NameChanged'>;
 	'Users:Deleted': StreamerCallbackArgs<'notify-logged', 'Users:Deleted'>;
 	'updateAvatar': StreamerCallbackArgs<'notify-logged', 'updateAvatar'>;

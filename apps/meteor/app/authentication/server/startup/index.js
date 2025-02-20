@@ -1,33 +1,50 @@
-import { Meteor } from 'meteor/meteor';
-import { Match } from 'meteor/check';
-import { Accounts } from 'meteor/accounts-base';
-import _ from 'underscore';
-import { escapeRegExp, escapeHTML } from '@rocket.chat/string-helpers';
+import { Apps, AppEvents } from '@rocket.chat/apps';
+import { User } from '@rocket.chat/core-services';
 import { Roles, Settings, Users } from '@rocket.chat/models';
+import { escapeRegExp, escapeHTML } from '@rocket.chat/string-helpers';
+import { getLoginExpirationInDays } from '@rocket.chat/tools';
+import { Accounts } from 'meteor/accounts-base';
+import { Match } from 'meteor/check';
+import { Meteor } from 'meteor/meteor';
+import _ from 'underscore';
 
-import * as Mailer from '../../../mailer/server/api';
-import { settings } from '../../../settings/server';
 import { callbacks } from '../../../../lib/callbacks';
-import { addUserRolesAsync } from '../../../../server/lib/roles/addUserRoles';
-import { getAvatarSuggestionForUser } from '../../../lib/server/functions/getAvatarSuggestionForUser';
+import { beforeCreateUserCallback } from '../../../../lib/callbacks/beforeCreateUserCallback';
 import { parseCSV } from '../../../../lib/utils/parseCSV';
-import { isValidAttemptByUser, isValidLoginAttemptByIp } from '../lib/restrictLoginAttempts';
-import { getClientAddress } from '../../../../server/lib/getClientAddress';
-import { getNewUserRoles } from '../../../../server/services/user/lib/getNewUserRoles';
-import { AppEvents, Apps } from '../../../../ee/server/apps/orchestrator';
-import { safeGetMeteorUser } from '../../../utils/server/functions/safeGetMeteorUser';
 import { safeHtmlDots } from '../../../../lib/utils/safeHtmlDots';
+import { getClientAddress } from '../../../../server/lib/getClientAddress';
+import { getMaxLoginTokens } from '../../../../server/lib/getMaxLoginTokens';
+import { i18n } from '../../../../server/lib/i18n';
+import { addUserRolesAsync } from '../../../../server/lib/roles/addUserRoles';
+import { getNewUserRoles } from '../../../../server/services/user/lib/getNewUserRoles';
+import { getAvatarSuggestionForUser } from '../../../lib/server/functions/getAvatarSuggestionForUser';
 import { joinDefaultChannels } from '../../../lib/server/functions/joinDefaultChannels';
 import { setAvatarFromServiceWithValidation } from '../../../lib/server/functions/setUserAvatar';
-import { i18n } from '../../../../server/lib/i18n';
+import { notifyOnSettingChangedById } from '../../../lib/server/lib/notifyListener';
+import * as Mailer from '../../../mailer/server/api';
+import { settings } from '../../../settings/server';
+import { getBaseUserFields } from '../../../utils/server/functions/getBaseUserFields';
+import { safeGetMeteorUser } from '../../../utils/server/functions/safeGetMeteorUser';
+import { isValidAttemptByUser, isValidLoginAttemptByIp } from '../lib/restrictLoginAttempts';
 
 Accounts.config({
 	forbidClientAccountCreation: true,
 });
+/**
+ * Accounts calls `_initServerPublications` and holds the `_defaultPublishFields`, without Object.assign its not possible
+ * to extend the projection
+ *
+ * the idea is to send all required fields to the client during login
+ * we tried `defaultFieldsSelector` , but it changes all Meteor.userAsync projections which is undesirable
+ *
+ *
+ * we are removing the status here because meteor send 'offline'
+ */
+Object.assign(Accounts._defaultPublishFields.projection, (({ status, ...rest }) => rest)(getBaseUserFields()));
 
 Meteor.startup(() => {
 	settings.watchMultiple(['Accounts_LoginExpiration', 'Site_Name', 'From_Email'], () => {
-		Accounts._options.loginExpirationInDays = settings.get('Accounts_LoginExpiration');
+		Accounts._options.loginExpirationInDays = getLoginExpirationInDays(settings.get('Accounts_LoginExpiration'));
 
 		Accounts.emailTemplates.siteName = settings.get('Site_Name');
 
@@ -157,8 +174,34 @@ const getLinkedInName = ({ firstName, lastName }) => {
 	return `${firstName} ${lastName}`;
 };
 
+const validateEmailDomain = (user) => {
+	if (user.type === 'visitor') {
+		return true;
+	}
+
+	let domainWhiteList = settings.get('Accounts_AllowedDomainsList');
+	if (_.isEmpty(domainWhiteList?.trim())) {
+		return true;
+	}
+
+	domainWhiteList = domainWhiteList.split(',').map((domain) => domain.trim());
+
+	if (user.emails && user.emails.length > 0) {
+		const email = user.emails[0].address;
+		const inWhiteList = domainWhiteList.some((domain) => email.match(`@${escapeRegExp(domain)}$`));
+
+		if (!inWhiteList) {
+			throw new Meteor.Error('error-invalid-domain');
+		}
+	}
+
+	return true;
+};
+
 const onCreateUserAsync = async function (options, user = {}) {
-	await callbacks.run('beforeCreateUser', options, user);
+	if (!options.skipBeforeCreateUserCallback) {
+		await beforeCreateUserCallback.run(options, user);
+	}
 
 	user.status = 'offline';
 	user.active = user.active !== undefined ? user.active : !settings.get('Accounts_ManuallyApproveNewUsers');
@@ -193,10 +236,10 @@ const onCreateUserAsync = async function (options, user = {}) {
 		}
 	}
 
-	if (!user.active) {
+	if (!options.skipAdminEmail && !user.active) {
 		const destinations = [];
 		const usersInRole = await Roles.findUsersInRole('admin');
-		await usersInRole.toArray().forEach((adminUser) => {
+		await usersInRole.forEach((adminUser) => {
 			if (Array.isArray(adminUser.emails)) {
 				adminUser.emails.forEach((email) => {
 					destinations.push(`${adminUser.name}<${email.address}>`);
@@ -218,25 +261,33 @@ const onCreateUserAsync = async function (options, user = {}) {
 		await Mailer.send(email);
 	}
 
-	await callbacks.run('onCreateUser', options, user);
+	if (!options.skipOnCreateUserCallback) {
+		await callbacks.run('onCreateUser', options, user);
+	}
 
-	// App IPostUserCreated event hook
-	await Apps.triggerEvent(AppEvents.IPostUserCreated, { user, performedBy: await safeGetMeteorUser() });
+	if (!options.skipEmailValidation && !validateEmailDomain(user)) {
+		throw new Meteor.Error(403, 'User validation failed');
+	}
 
 	return user;
 };
 
 Accounts.onCreateUser(function (...args) {
 	// Depends on meteor support for Async
-	return Promise.await(onCreateUserAsync.call(this, ...args));
+	return onCreateUserAsync.call(this, ...args);
 });
 
 const { insertUserDoc } = Accounts;
-const insertUserDocAsync = async function (options, user) {
-	const globalRoles = [];
+
+Accounts.insertUserDoc = async function (options, user) {
+	const globalRoles = new Set();
+
+	if (Match.test(options.globalRoles, [String]) && options.globalRoles.length > 0) {
+		options.globalRoles.map((role) => globalRoles.add(role));
+	}
 
 	if (Match.test(user.globalRoles, [String]) && user.globalRoles.length > 0) {
-		globalRoles.push(...user.globalRoles);
+		user.globalRoles.map((role) => globalRoles.add(role));
 	}
 
 	delete user.globalRoles;
@@ -245,11 +296,12 @@ const insertUserDocAsync = async function (options, user) {
 		const defaultAuthServiceRoles = parseCSV(settings.get('Accounts_Registration_AuthenticationServices_Default_Roles') || '');
 
 		if (defaultAuthServiceRoles.length > 0) {
-			globalRoles.push(...defaultAuthServiceRoles);
+			defaultAuthServiceRoles.map((role) => globalRoles.add(role));
 		}
 	}
 
-	const roles = getNewUserRoles(globalRoles);
+	const arrayGlobalRoles = [...globalRoles];
+	const roles = options.skipNewUserRolesSetting ? arrayGlobalRoles : getNewUserRoles(arrayGlobalRoles);
 
 	if (!user.type) {
 		user.type = 'user';
@@ -263,23 +315,52 @@ const insertUserDocAsync = async function (options, user) {
 		};
 	}
 
-	const _id = insertUserDoc.call(Accounts, options, user);
+	// Make sure that the user has the field 'roles'
+	if (!user.roles) {
+		user.roles = [];
+	}
+
+	const _id = await insertUserDoc.call(Accounts, options, user);
 
 	user = await Users.findOne({
 		_id,
 	});
 
+	/**
+	 * if settings shows setup wizard to be pending
+	 * and no admin's been found,
+	 * and existing role list doesn't include admin
+	 * create this user admin.
+	 * count this as the completion of setup wizard step 1.
+	 */
+	if (!options.skipAdminCheck) {
+		const hasAdmin = await Users.findOneByRolesAndType('admin', 'user', { projection: { _id: 1 } });
+		if (!roles.includes('admin') && !hasAdmin) {
+			roles.push('admin');
+			if (settings.get('Show_Setup_Wizard') === 'pending') {
+				// TODO: audit
+				(await Settings.updateValueById('Show_Setup_Wizard', 'in_progress')).modifiedCount &&
+					void notifyOnSettingChangedById('Show_Setup_Wizard');
+			}
+		}
+	}
+
+	await addUserRolesAsync(_id, roles);
+
+	// Make user's roles to be present on callback
+	user = await Users.findOneById(_id, { projection: { username: 1, type: 1, roles: 1 } });
+
 	if (user.username) {
-		if (options.joinDefaultChannels !== false && user.joinDefaultChannels !== false) {
+		if (options.joinDefaultChannels !== false) {
 			await joinDefaultChannels(_id, options.joinDefaultChannelsSilenced);
 		}
 
-		if (user.type !== 'visitor') {
-			setImmediate(function () {
+		if (!options.skipAfterCreateUserCallback && user.type !== 'visitor') {
+			setImmediate(() => {
 				return callbacks.run('afterCreateUser', user);
 			});
 		}
-		if (settings.get('Accounts_SetDefaultAvatar') === true) {
+		if (!options.skipDefaultAvatar && settings.get('Accounts_SetDefaultAvatar') === true) {
 			const avatarSuggestions = await getAvatarSuggestionForUser(user);
 			for await (const service of Object.keys(avatarSuggestions)) {
 				const avatarData = avatarSuggestions[service];
@@ -291,29 +372,14 @@ const insertUserDocAsync = async function (options, user) {
 		}
 	}
 
-	/**
-	 * if settings shows setup wizard to be pending
-	 * and no admin's been found,
-	 * and existing role list doesn't include admin
-	 * create this user admin.
-	 * count this as the completion of setup wizard step 1.
-	 */
-	const hasAdmin = await Users.findOneByRolesAndType('admin', 'user', { projection: { _id: 1 } });
-	if (!roles.includes('admin') && !hasAdmin) {
-		roles.push('admin');
-		if (settings.get('Show_Setup_Wizard') === 'pending') {
-			await Settings.updateValueById('Show_Setup_Wizard', 'in_progress');
-		}
+	if (!options.skipAppsEngineEvent) {
+		// `post` triggered events don't need to wait for the promise to resolve
+		Apps.self?.triggerEvent(AppEvents.IPostUserCreated, { user, performedBy: await safeGetMeteorUser() }).catch((e) => {
+			Apps.self?.getRocketChatLogger().error('Error while executing post user created event:', e);
+		});
 	}
 
-	await addUserRolesAsync(_id, roles);
-
 	return _id;
-};
-
-Accounts.insertUserDoc = function (...args) {
-	// Depends on meteor support for Async
-	return Promise.await(insertUserDocAsync.call(this, ...args));
 };
 
 const validateLoginAttemptAsync = async function (login) {
@@ -367,7 +433,7 @@ const validateLoginAttemptAsync = async function (login) {
 	login = await callbacks.run('onValidateLogin', login);
 
 	await Users.updateLastLoginById(login.user._id);
-	setImmediate(function () {
+	setImmediate(() => {
 		return callbacks.run('afterValidateLogin', login);
 	});
 
@@ -377,7 +443,7 @@ const validateLoginAttemptAsync = async function (login) {
 	 */
 	if (login.type !== 'resume') {
 		// App IPostUserLoggedIn event hook
-		await Apps.triggerEvent(AppEvents.IPostUserLoggedIn, login.user);
+		await Apps.self?.triggerEvent(AppEvents.IPostUserLoggedIn, login.user);
 	}
 
 	return true;
@@ -385,10 +451,10 @@ const validateLoginAttemptAsync = async function (login) {
 
 Accounts.validateLoginAttempt(function (...args) {
 	// Depends on meteor support for Async
-	return Promise.await(validateLoginAttemptAsync.call(this, ...args));
+	return validateLoginAttemptAsync.call(this, ...args);
 });
 
-Accounts.validateNewUser(function (user) {
+Accounts.validateNewUser((user) => {
 	if (user.type === 'visitor') {
 		return true;
 	}
@@ -404,7 +470,7 @@ Accounts.validateNewUser(function (user) {
 	return true;
 });
 
-Accounts.validateNewUser(function (user) {
+Accounts.validateNewUser((user) => {
 	if (user.type === 'visitor') {
 		return true;
 	}
@@ -428,20 +494,14 @@ Accounts.validateNewUser(function (user) {
 	return true;
 });
 
-export const MAX_RESUME_LOGIN_TOKENS = parseInt(process.env.MAX_RESUME_LOGIN_TOKENS) || 50;
-
 Accounts.onLogin(async ({ user }) => {
 	if (!user || !user.services || !user.services.resume || !user.services.resume.loginTokens || !user._id) {
 		return;
 	}
 
-	if (user.services.resume.loginTokens.length < MAX_RESUME_LOGIN_TOKENS) {
+	if (user.services.resume.loginTokens.length < getMaxLoginTokens()) {
 		return;
 	}
 
-	const { tokens } = (await Users.findAllResumeTokensByUserId(user._id))[0];
-	if (tokens.length >= MAX_RESUME_LOGIN_TOKENS) {
-		const oldestDate = tokens.reverse()[MAX_RESUME_LOGIN_TOKENS - 1];
-		await Users.removeOlderResumeTokensByUserId(user._id, oldestDate.when);
-	}
+	await User.ensureLoginTokensLimit(user._id);
 });

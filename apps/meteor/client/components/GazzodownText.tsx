@@ -1,21 +1,23 @@
 import type { IRoom } from '@rocket.chat/core-typings';
+import { useLocalStorage } from '@rocket.chat/fuselage-hooks';
 import type { ChannelMention, UserMention } from '@rocket.chat/gazzodown';
 import { MarkupInteractionContext } from '@rocket.chat/gazzodown';
 import { escapeRegExp } from '@rocket.chat/string-helpers';
-import { RouterContext, useLayout, useUserPreference } from '@rocket.chat/ui-contexts';
+import { useFeaturePreview } from '@rocket.chat/ui-client';
+import { useLayout, useRouter, useSetting, useUserPreference, useUserId } from '@rocket.chat/ui-contexts';
 import type { UIEvent } from 'react';
-import React, { useContext, useCallback, memo, useMemo } from 'react';
+import { useCallback, memo, useMemo } from 'react';
 
 import { detectEmoji } from '../lib/utils/detectEmoji';
 import { fireGlobalEvent } from '../lib/utils/fireGlobalEvent';
-import { useChat } from '../views/room/contexts/ChatContext';
-import { useGoToRoom } from '../views/room/hooks/useGoToRoom';
 import { useMessageListHighlights } from './message/list/MessageListContext';
+import { useUserCard } from '../views/room/contexts/UserCardContext';
+import { useGoToRoom } from '../views/room/hooks/useGoToRoom';
 
 type GazzodownTextProps = {
 	children: JSX.Element;
 	mentions?: {
-		type: 'user' | 'team';
+		type?: 'user' | 'team';
 		_id: string;
 		username?: string;
 		name?: string;
@@ -25,16 +27,23 @@ type GazzodownTextProps = {
 };
 
 const GazzodownText = ({ mentions, channels, searchText, children }: GazzodownTextProps) => {
+	const enableTimestamp = useFeaturePreview('enable-timestamp-message-parser');
+	const [userLanguage] = useLocalStorage('userLanguage', 'en');
+
 	const highlights = useMessageListHighlights();
+	const { triggerProps, openUserCard } = useUserCard();
+
 	const highlightRegex = useMemo(() => {
 		if (!highlights?.length) {
 			return;
 		}
 
-		const alternatives = highlights.map(({ highlight }) => escapeRegExp(highlight)).join('|');
-		const expression = `(?=^|\\b|[\\s\\n\\r\\t.,،'\\\"\\+!?:-])(${alternatives})(?=$|\\b|[\\s\\n\\r\\t.,،'\\\"\\+!?:-])`;
+		// Due to unnecessary escaping in escapeRegExp, we need to remove the escape character for the following characters: - = ! :
+		// This is necessary because it was crashing the client due to Invalid regular expression error.
+		const alternatives = highlights.map(({ highlight }) => escapeRegExp(highlight).replace(/\\([-=!:])/g, '$1')).join('|');
+		const expression = `(?<=^|[\\p{P}\\p{Z}])(${alternatives})(?=$|[\\p{P}\\p{Z}])`;
 
-		return (): RegExp => new RegExp(expression, 'gmi');
+		return (): RegExp => new RegExp(expression, 'gmiu');
 	}, [highlights]);
 
 	const markRegex = useMemo(() => {
@@ -46,8 +55,10 @@ const GazzodownText = ({ mentions, channels, searchText, children }: GazzodownTe
 	}, [searchText]);
 
 	const convertAsciiToEmoji = useUserPreference<boolean>('convertAsciiEmoji', true);
-
-	const chat = useChat();
+	const useEmoji = Boolean(useUserPreference('useEmojis'));
+	const useRealName = useSetting('UI_Use_Real_Name', false);
+	const ownUserId = useUserId();
+	const showMentionSymbol = Boolean(useUserPreference<boolean>('mentionsWithSymbol'));
 
 	const resolveUserMention = useCallback(
 		(mention: string) => {
@@ -71,25 +82,29 @@ const GazzodownText = ({ mentions, channels, searchText, children }: GazzodownTe
 
 			return (event: UIEvent): void => {
 				event.stopPropagation();
-				chat?.userCard.open(username)(event);
+				openUserCard(event, username);
 			};
 		},
-		[chat?.userCard],
+		[openUserCard],
 	);
 
 	const goToRoom = useGoToRoom();
-	const router = useContext(RouterContext);
 
-	const { isEmbedded } = useLayout();
+	const { isEmbedded, isMobile } = useLayout();
 
 	const resolveChannelMention = useCallback((mention: string) => channels?.find(({ name }) => name === mention), [channels]);
+
+	const router = useRouter();
 
 	const onChannelMentionClick = useCallback(
 		({ _id: rid }: ChannelMention) =>
 			(event: UIEvent): void => {
 				if (isEmbedded) {
 					fireGlobalEvent('click-mention-link', {
-						path: router.getRoutePath('channel', { name: rid }),
+						path: router.buildRoutePath({
+							pattern: '/channel/:name/:tab?/:context?',
+							params: { name: rid },
+						}),
 						channel: rid,
 					});
 				}
@@ -97,7 +112,7 @@ const GazzodownText = ({ mentions, channels, searchText, children }: GazzodownTe
 				event.stopPropagation();
 				goToRoom(rid);
 			},
-		[isEmbedded, goToRoom, router],
+		[router, isEmbedded, goToRoom],
 	);
 
 	return (
@@ -106,11 +121,19 @@ const GazzodownText = ({ mentions, channels, searchText, children }: GazzodownTe
 				detectEmoji,
 				highlightRegex,
 				markRegex,
-				convertAsciiToEmoji,
 				resolveUserMention,
 				onUserMentionClick,
 				resolveChannelMention,
 				onChannelMentionClick,
+				convertAsciiToEmoji,
+				useEmoji,
+				useRealName,
+				isMobile,
+				ownUserId,
+				showMentionSymbol,
+				triggerProps,
+				enableTimestamp,
+				language: userLanguage,
 			}}
 		>
 			{children}

@@ -1,9 +1,9 @@
-import { Divider, Modal, ButtonGroup, Button, Field, TextInput, Throbber } from '@rocket.chat/fuselage';
+import { Divider, Modal, ButtonGroup, Button, Field, FieldLabel, FieldRow, FieldError, FieldHint, TextInput } from '@rocket.chat/fuselage';
 import type { TranslationKey } from '@rocket.chat/ui-contexts';
 import { useSetModal, useTranslation, useEndpoint, useToastMessageDispatch } from '@rocket.chat/ui-contexts';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { VFC, FormEvent } from 'react';
-import React, { useState } from 'react';
+import type { FormEvent } from 'react';
+import { useId, useState } from 'react';
 
 import MatrixFederationRemoveServerList from './MatrixFederationRemoveServerList';
 import MatrixFederationSearch from './MatrixFederationSearch';
@@ -25,7 +25,7 @@ const getErrorKey = (error: any): TranslationKey | undefined => {
 	}
 };
 
-const MatrixFederationAddServerModal: VFC<MatrixFederationAddServerModalProps> = ({ onClickClose }) => {
+const MatrixFederationAddServerModal = ({ onClickClose }: MatrixFederationAddServerModalProps) => {
 	const t = useTranslation();
 	const addMatrixServer = useEndpoint('POST', '/v1/federation/addServerByUser');
 	const [serverName, setServerName] = useState('');
@@ -36,13 +36,19 @@ const MatrixFederationAddServerModal: VFC<MatrixFederationAddServerModalProps> =
 
 	const {
 		mutate: addServer,
-		isLoading,
+		isPending,
 		isError,
-	} = useMutation(['v1/federation/addServerByUser', serverName], () => addMatrixServer({ serverName }), {
+	} = useMutation({
+		mutationKey: ['v1/federation/addServerByUser', serverName],
+		mutationFn: () => addMatrixServer({ serverName }),
+
 		onSuccess: async () => {
-			await queryClient.invalidateQueries(['federation/listServersByUsers']);
+			await queryClient.invalidateQueries({
+				queryKey: ['federation/listServersByUsers'],
+			});
 			setModal(<MatrixFederationSearch defaultSelectedServer={serverName} onClose={onClickClose} key={serverName} />);
 		},
+
 		onError: (error) => {
 			const errorKey = getErrorKey(error);
 			if (!errorKey) {
@@ -53,20 +59,24 @@ const MatrixFederationAddServerModal: VFC<MatrixFederationAddServerModalProps> =
 		},
 	});
 
-	const { data, isLoading: isLoadingServerList } = useMatrixServerList();
+	const { data, isPending: isLoadingServerList } = useMatrixServerList();
+
+	const titleId = useId();
+	const serverNameId = useId();
 
 	return (
-		<Modal maxHeight={'x600'}>
+		<Modal maxHeight='x600' open aria-labelledby={titleId}>
 			<Modal.Header>
-				<Modal.Title>{t('Manage_servers')}</Modal.Title>
+				<Modal.Title id={titleId}>{t('Manage_servers')}</Modal.Title>
 				<Modal.Close onClick={onClickClose} />
 			</Modal.Header>
 			<Modal.Content>
 				<Field>
-					<Field.Label>{t('Server_name')}</Field.Label>
-					<Field.Row>
+					<FieldLabel htmlFor={serverNameId}>{t('Server_name')}</FieldLabel>
+					<FieldRow>
 						<TextInput
-							disabled={isLoading}
+							id={serverNameId}
+							disabled={isPending}
 							value={serverName}
 							onChange={(e: FormEvent<HTMLInputElement>) => {
 								setServerName(e.currentTarget.value);
@@ -74,17 +84,16 @@ const MatrixFederationAddServerModal: VFC<MatrixFederationAddServerModalProps> =
 									setErrorKey(undefined);
 								}
 							}}
-							mie='x4'
+							mie={4}
 						/>
-						<Button onClick={() => addServer()} primary disabled={isLoading}>
-							{!isLoading && t('Add')}
-							{isLoading && <Throbber inheritColor />}
+						<Button primary loading={isPending} onClick={() => addServer()}>
+							{t('Add')}
 						</Button>
-					</Field.Row>
-					{isError && errorKey && <Field.Error>{t(errorKey)}</Field.Error>}
-					<Field.Hint>{t('Federation_Example_matrix_server')}</Field.Hint>
+					</FieldRow>
+					{isError && errorKey && <FieldError>{t(errorKey)}</FieldError>}
+					<FieldHint>{t('Federation_Example_matrix_server')}</FieldHint>
 				</Field>
-				<Divider mb='x16' />
+				<Divider mb={16} />
 				{!isLoadingServerList && data?.servers && <MatrixFederationRemoveServerList servers={data.servers} />}
 			</Modal.Content>
 			<Modal.Footer>

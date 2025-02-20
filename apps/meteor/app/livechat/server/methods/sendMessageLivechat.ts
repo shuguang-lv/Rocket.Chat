@@ -1,36 +1,12 @@
-import { Meteor } from 'meteor/meteor';
-import { Match, check } from 'meteor/check';
 import { OmnichannelSourceType } from '@rocket.chat/core-typings';
-import type { MessageAttachment } from '@rocket.chat/core-typings';
+import type { ServerMethods } from '@rocket.chat/ddp-client';
 import { LivechatVisitors } from '@rocket.chat/models';
-import type { ServerMethods } from '@rocket.chat/ui-contexts';
+import { Match, check } from 'meteor/check';
+import { Meteor } from 'meteor/meteor';
 
-import { Livechat } from '../lib/Livechat';
 import { settings } from '../../../settings/server';
-
-interface ILivechatMessage {
-	token: string;
-	_id: string;
-	rid: string;
-	msg: string;
-	file?: {
-		_id: string;
-		name?: string;
-		type?: string;
-		size?: number;
-		description?: string;
-		identify?: { size: { width: number; height: number } };
-	};
-	files?: {
-		_id: string;
-		name?: string;
-		type?: string;
-		size?: number;
-		description?: string;
-		identify?: { size: { width: number; height: number } };
-	}[];
-	attachments?: MessageAttachment[];
-}
+import { Livechat } from '../lib/LivechatTyped';
+import type { ILivechatMessage } from '../lib/localTypes';
 
 interface ILivechatMessageAgent {
 	agentId: string;
@@ -42,7 +18,7 @@ interface ISendMessageLivechat {
 	agent?: ILivechatMessageAgent;
 }
 
-declare module '@rocket.chat/ui-contexts' {
+declare module '@rocket.chat/ddp-client' {
 	// eslint-disable-next-line @typescript-eslint/naming-convention
 	interface ServerMethods {
 		sendMessageLivechat(message: ILivechatMessage, agent: ILivechatMessageAgent): boolean;
@@ -50,7 +26,7 @@ declare module '@rocket.chat/ui-contexts' {
 }
 
 export const sendMessageLivechat = async ({
-	message: { token, _id, rid, msg, file, attachments },
+	message: { token, _id, rid, msg, file, files, attachments },
 	agent,
 }: ISendMessageLivechat): Promise<boolean> => {
 	check(token, String);
@@ -91,6 +67,7 @@ export const sendMessageLivechat = async ({
 			msg,
 			token,
 			file,
+			files,
 			attachments,
 		},
 		agent,
@@ -103,7 +80,7 @@ export const sendMessageLivechat = async ({
 };
 
 Meteor.methods<ServerMethods>({
-	async sendMessageLivechat({ token, _id, rid, msg, file, attachments }: ILivechatMessage, agent: ILivechatMessageAgent) {
-		return sendMessageLivechat({ message: { token, _id, rid, msg, file, attachments }, agent });
+	async sendMessageLivechat({ token, _id, rid, msg, file, files, attachments }: ILivechatMessage, agent: ILivechatMessageAgent) {
+		return sendMessageLivechat({ message: { token, _id, rid, msg, file, files, attachments }, agent });
 	},
 });

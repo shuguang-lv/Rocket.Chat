@@ -1,12 +1,18 @@
 import type { SelectOption } from '@rocket.chat/fuselage';
 import { Button, ButtonGroup } from '@rocket.chat/fuselage';
-import { useTranslation } from '@rocket.chat/ui-contexts';
 import type { ReactElement } from 'react';
-import React from 'react';
 import { useFormContext } from 'react-hook-form';
+import { useTranslation } from 'react-i18next';
 
-import VerticalBar from '../../../../components/VerticalBar';
 import NotificationPreferencesForm from './NotificationPreferencesForm';
+import {
+	ContextualbarHeader,
+	ContextualbarIcon,
+	ContextualbarTitle,
+	ContextualbarClose,
+	ContextualbarScrollableContent,
+	ContextualbarFooter,
+} from '../../../../components/Contextualbar';
 
 type NotificationPreferencesProps = {
 	handleClose: () => void;
@@ -23,29 +29,29 @@ const NotificationPreferences = ({
 	notificationOptions,
 	handlePlaySound,
 }: NotificationPreferencesProps): ReactElement => {
-	const t = useTranslation();
+	const { t } = useTranslation();
 	const {
-		formState: { isDirty },
+		formState: { isDirty, isSubmitting },
 	} = useFormContext();
 
 	return (
 		<>
-			<VerticalBar.Header>
-				<VerticalBar.Icon name='bell' />
-				<VerticalBar.Text>{t('Notifications_Preferences')}</VerticalBar.Text>
-				{handleClose && <VerticalBar.Close onClick={handleClose} />}
-			</VerticalBar.Header>
-			<VerticalBar.ScrollableContent>
+			<ContextualbarHeader>
+				<ContextualbarIcon name='bell' />
+				<ContextualbarTitle>{t('Notifications_Preferences')}</ContextualbarTitle>
+				{handleClose && <ContextualbarClose onClick={handleClose} />}
+			</ContextualbarHeader>
+			<ContextualbarScrollableContent>
 				<NotificationPreferencesForm notificationOptions={notificationOptions} handlePlaySound={handlePlaySound} />
-			</VerticalBar.ScrollableContent>
-			<VerticalBar.Footer>
+			</ContextualbarScrollableContent>
+			<ContextualbarFooter>
 				<ButtonGroup stretch>
 					{handleClose && <Button onClick={handleClose}>{t('Cancel')}</Button>}
-					<Button primary disabled={!isDirty} onClick={handleSave}>
+					<Button primary disabled={!isDirty} loading={isSubmitting} onClick={handleSave}>
 						{t('Save')}
 					</Button>
 				</ButtonGroup>
-			</VerticalBar.Footer>
+			</ContextualbarFooter>
 		</>
 	);
 };

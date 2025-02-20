@@ -1,12 +1,20 @@
 /* eslint-disable @typescript-eslint/no-this-alias */
-import type { StreamNames, StreamKeys, StreamerCallbackArgs } from '@rocket.chat/ui-contexts/src/ServerContext/streams';
-import type { ServerMethods, ServerMethodReturn } from '@rocket.chat/ui-contexts';
-import type { IMessage, Serialized } from '@rocket.chat/core-typings';
-import type { OperationParams, OperationResult } from '@rocket.chat/rest-typings';
-import { Emitter } from '@rocket.chat/emitter';
-import { RestClient } from '@rocket.chat/api-client';
 
+import { RestClient } from '@rocket.chat/api-client';
+import type { IMessage, Serialized } from '@rocket.chat/core-typings';
+import { Emitter } from '@rocket.chat/emitter';
+import type { OperationParams, OperationResult } from '@rocket.chat/rest-typings';
+
+import { ClientStreamImpl } from '../ClientStream';
+import { ConnectionImpl } from '../Connection';
+import { DDPDispatcher } from '../DDPDispatcher';
 import { DDPSDK } from '../DDPSDK';
+import { TimeoutControl } from '../TimeoutControl';
+import { AccountImpl } from '../types/Account';
+import type { ClientStream } from '../types/ClientStream';
+import type { DDPDispatchOptions } from '../types/DDPClient';
+import type { ServerMethodReturn, ServerMethods } from '../types/methods';
+import type { StreamNames, StreamKeys, StreamerCallbackArgs } from '../types/streams';
 import type {
 	APILegacy,
 	DPPLegacy,
@@ -14,12 +22,6 @@ import type {
 	RocketchatSdkLegacyEventsKeys,
 	RocketchatSdkLegacyEventsValues,
 } from './types/SDKLegacy';
-import type { DDPDispatchOptions } from '../types/DDPClient';
-import { DDPDispatcher } from '../DDPDispatcher';
-import { ConnectionImpl } from '../Connection';
-import { ClientStreamImpl } from '../ClientStream';
-import { AccountImpl } from '../types/Account';
-import { TimeoutControl } from '../TimeoutControl';
 
 declare module '../ClientStream' {
 	interface ClientStream {
@@ -35,18 +37,13 @@ declare module '../ClientStream' {
 	}
 }
 
-declare module '../DDPSDK' {
-	interface DDPSDK {
+declare module '../types/SDK' {
+	interface SDK {
 		stream<N extends StreamNames, K extends StreamKeys<N>>(
 			streamName: N,
 			key: K,
 			callback: (...args: StreamerCallbackArgs<N, K>) => void,
-		): {
-			stop: () => void;
-			ready: () => Promise<void>;
-			isReady: boolean;
-			onReady: (cb: () => void) => void;
-		};
+		): ReturnType<ClientStream['subscribe']>;
 	}
 }
 
@@ -166,11 +163,11 @@ export class RocketchatSdkLegacyImpl extends DDPSDK implements RocketchatSDKLega
 					? {
 							msg: message,
 							rid,
-					  }
+						}
 					: {
 							...message,
 							rid,
-					  },
+						},
 		});
 	}
 
@@ -190,8 +187,8 @@ export class RocketchatSdkLegacyImpl extends DDPSDK implements RocketchatSDKLega
 		return this.client.callAsync(method, ...args);
 	}
 
-	subscribe(topic: string, ...args: any[]): Promise<unknown> {
-		return this.client.subscribe(topic, ...args);
+	subscribe(topic: string, ...args: any[]) {
+		return this.client.subscribe(topic, ...args).ready();
 	}
 
 	subscribeRoom(rid: string): Promise<unknown> {
@@ -209,7 +206,6 @@ export class RocketchatSdkLegacyImpl extends DDPSDK implements RocketchatSDKLega
 			// this.stream('notify-all', 'deleteEmojiCustom', (...args) => this.ev.emit('deleteEmojiCustom', args)),
 			// this.stream('notify-all', 'updateAvatar', (...args) => this.ev.emit('updateAvatar', args)),
 			this.stream('notify-all', 'public-settings-changed', (...args) => this.ev.emit('public-settings-changed', args)),
-			this.stream('notify-all', 'permissions-changed', (...args) => this.ev.emit('permissions-changed', args)),
 		]);
 	}
 
@@ -221,6 +217,7 @@ export class RocketchatSdkLegacyImpl extends DDPSDK implements RocketchatSDKLega
 			this.stream('notify-logged', 'updateEmojiCustom', (...args) => this.ev.emit('updateEmojiCustom', args)),
 			this.stream('notify-logged', 'deleteEmojiCustom', (...args) => this.ev.emit('deleteEmojiCustom', args)),
 			this.stream('notify-logged', 'roles-change', (...args) => this.ev.emit('roles-change', args)),
+			this.stream('notify-logged', 'permissions-changed', (...args) => this.ev.emit('permissions-changed', args)),
 		]);
 	}
 

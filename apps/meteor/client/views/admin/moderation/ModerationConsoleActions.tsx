@@ -1,6 +1,6 @@
-import { Menu, Option } from '@rocket.chat/fuselage';
-import { useTranslation } from '@rocket.chat/ui-contexts';
-import React from 'react';
+// import { Menu, Option } from '@rocket.chat/fuselage';
+import { GenericMenu } from '@rocket.chat/ui-client';
+import { useTranslation } from 'react-i18next';
 
 import type { ModerationConsoleRowProps } from './ModerationConsoleTableRow';
 import useDeactivateUserAction from './hooks/useDeactivateUserAction';
@@ -9,26 +9,35 @@ import useDismissUserAction from './hooks/useDismissUserAction';
 import useResetAvatarAction from './hooks/useResetAvatarAction';
 
 const ModerationConsoleActions = ({ report, onClick }: Omit<ModerationConsoleRowProps, 'isDesktopOrLarger'>): JSX.Element => {
-	const t = useTranslation();
-	const { userId: uid } = report;
+	const { t } = useTranslation();
+	const { userId: uid, isUserDeleted } = report;
 
 	return (
 		<>
-			<Menu
-				options={{
-					seeReports: {
-						label: { label: t('Moderation_See_messages'), icon: 'document-eye' },
-						action: () => onClick(uid),
+			<GenericMenu
+				title={t('Options')}
+				detached
+				sections={[
+					{
+						items: [
+							{
+								id: 'seeReports',
+								content: t('Moderation_See_messages'),
+								icon: 'document-eye',
+								onClick: () => onClick(uid),
+							},
+						],
 					},
-					divider: {
-						type: 'divider',
+					{
+						items: [
+							useDismissUserAction(uid),
+							useDeleteMessagesAction(uid),
+							{ ...useDeactivateUserAction(uid), ...(isUserDeleted && { disabled: true }) },
+							{ ...useResetAvatarAction(uid), ...(isUserDeleted && { disabled: true }) },
+						],
 					},
-					approve: useDismissUserAction(uid),
-					deleteAll: useDeleteMessagesAction(uid),
-					deactiveUser: useDeactivateUserAction(uid),
-					resetAvatar: useResetAvatarAction(uid),
-				}}
-				renderItem={({ label: { label, icon }, ...props }) => <Option label={label} icon={icon} {...props} />}
+				]}
+				placement='bottom-end'
 			/>
 		</>
 	);

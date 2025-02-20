@@ -1,9 +1,8 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
-import { check } from 'meteor/check';
-import Gravatar from 'gravatar';
-import { ServiceConfiguration } from 'meteor/service-configuration';
 import type { IUser } from '@rocket.chat/core-typings';
 import { serverFetch as fetch } from '@rocket.chat/server-fetch';
+import Gravatar from 'gravatar';
+import { check } from 'meteor/check';
+import { ServiceConfiguration } from 'meteor/service-configuration';
 
 import { settings } from '../../../settings/server';
 
@@ -168,7 +167,7 @@ export async function getAvatarSuggestionForUser(
 				let blob = `data:${response.headers.get('content-type')};base64,`;
 				blob += Buffer.from(await response.arrayBuffer()).toString('base64');
 				newAvatar.blob = blob;
-				newAvatar.contentType = response.headers.get('content-type')!;
+				newAvatar.contentType = response.headers.get('content-type') as string;
 				validAvatars[avatar.service] = newAvatar;
 			}
 		} catch (error) {

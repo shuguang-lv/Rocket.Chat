@@ -11,11 +11,17 @@
 		{
 			"pattern": "ee/apps/*",
 			"changeProcessCWD": true
+		},
+		{
+			"pattern": "ee/packages/*",
+			"changeProcessCWD": true
 		}
 	],
 	"typescript.tsdk": "./node_modules/typescript/lib",
 	"cSpell.words": [
 		"autotranslate",
+		"ciphertext",
+		"Contextualbar",
 		"fname",
 		"Gazzodown",
 		"katex",
@@ -24,6 +30,7 @@
 		"oauthapps",
 		"omnichannel",
 		"photoswipe",
+		"proxify",
 		"searchbox",
 		"tmid",
 		"tshow"

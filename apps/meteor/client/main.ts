@@ -1,15 +1,18 @@
-import '../ee/definition';
-import '../ee/client/ecdh';
-import './polyfills';
+import './serviceWorker';
+import './startup/accounts';
 
-import '../lib/oauthRedirectUriClient';
-import './lib/meteorCallWrapper';
-import './importPackages';
+import { FlowRouter } from 'meteor/ostrio:flow-router-extra';
 
-import '../ee/client';
-import './methods';
-import './startup';
-import './views/admin';
-import './views/marketplace';
-import './views/account';
-import './views/teams';
+FlowRouter.wait();
+
+FlowRouter.notFound = {
+	action: () => undefined,
+};
+
+import('./polyfills')
+	.then(() => import('./meteorOverrides'))
+	.then(() => import('./ecdh'))
+	.then(() => import('./importPackages'))
+	.then(() => import('./startup'))
+	.then(() => import('./omnichannel'))
+	.then(() => Promise.all([import('./views/admin'), import('./views/marketplace'), import('./views/account')]));

@@ -1,46 +1,66 @@
 import type { IRoom, RoomType } from '@rocket.chat/core-typings';
-import { useMethod, useRoute, useSetting, useUser } from '@rocket.chat/ui-contexts';
-import { useQuery } from '@tanstack/react-query';
+import { useMethod, usePermission, useRoute, useSetting, useUser } from '@rocket.chat/ui-contexts';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
 
-import { ChatRoom, ChatSubscription } from '../../../../app/models/client';
-import { LegacyRoomManager } from '../../../../app/ui-utils/client';
+import { useOpenRoomMutation } from './useOpenRoomMutation';
+import { Rooms } from '../../../../app/models/client';
 import { roomFields } from '../../../../lib/publishFields';
 import { omit } from '../../../../lib/utils/omit';
-import { RoomManager } from '../../../lib/RoomManager';
 import { NotAuthorizedError } from '../../../lib/errors/NotAuthorizedError';
+import { NotSubscribedToRoomError } from '../../../lib/errors/NotSubscribedToRoomError';
+import { OldUrlRoomError } from '../../../lib/errors/OldUrlRoomError';
 import { RoomNotFoundError } from '../../../lib/errors/RoomNotFoundError';
-import { fireGlobalEvent } from '../../../lib/utils/fireGlobalEvent';
-import { waitUntilFind } from '../../../lib/utils/waitUntilFind';
 
 export function useOpenRoom({ type, reference }: { type: RoomType; reference: string }) {
 	const user = useUser();
-	const allowAnonymousRead = useSetting<boolean>('Accounts_AllowAnonymousRead') ?? true;
+	const hasPreviewPermission = usePermission('preview-c-room');
+	const allowAnonymousRead = useSetting('Accounts_AllowAnonymousRead', true);
 	const getRoomByTypeAndName = useMethod('getRoomByTypeAndName');
 	const createDirectMessage = useMethod('createDirectMessage');
-	const openRoom = useMethod('openRoom');
 	const directRoute = useRoute('direct');
+	const openRoom = useOpenRoomMutation();
 
-	return useQuery(
+	const unsubscribeFromRoomOpenedEvent = useRef<() => void>(() => undefined);
+
+	const result = useQuery({
 		// we need to add uid and username here because `user` is not loaded all at once (see UserProvider -> Meteor.user())
-		['rooms', { type, reference }, { uid: user?._id, username: user?.username }] as const,
-		async (): Promise<{ rid: IRoom['_id'] }> => {
+		queryKey: ['rooms', { reference, type }, { uid: user?._id, username: user?.username }] as const,
+
+		queryFn: async (): Promise<{ rid: IRoom['_id'] }> => {
 			if ((user && !user.username) || (!user && !allowAnonymousRead)) {
 				throw new NotAuthorizedError();
+			}
+
+			if (!reference || !type) {
+				throw new RoomNotFoundError(undefined, { type, reference });
 			}
 
 			let roomData;
 			try {
 				roomData = await getRoomByTypeAndName(type, reference);
 			} catch (error) {
-				throw new RoomNotFoundError(undefined, { type, reference });
+				if (type !== 'd') {
+					throw new RoomNotFoundError(undefined, { type, reference });
+				}
+
+				try {
+					const { rid } = await createDirectMessage(...reference.split(', '));
+
+					directRoute.push({ rid }, (prev) => prev);
+				} catch (error) {
+					throw new RoomNotFoundError(undefined, { type, reference });
+				}
+
+				throw new OldUrlRoomError(undefined, { type, reference });
 			}
 
 			if (!roomData._id) {
 				throw new RoomNotFoundError(undefined, { type, reference });
 			}
 
-			const $set: Record<string, unknown> = {};
-			const $unset: Record<string, unknown> = {};
+			const $set: any = {};
+			const $unset: any = {};
 
 			for (const key of Object.keys(roomFields)) {
 				if (key in roomData) {
@@ -50,17 +70,35 @@ export function useOpenRoom({ type, reference }: { type: RoomType; reference: st
 				}
 			}
 
-			ChatRoom.upsert({ _id: roomData._id }, { $set, $unset });
-			const room = ChatRoom.findOne({ _id: roomData._id });
+			const { Rooms, Subscriptions } = await import('../../../../app/models/client');
+
+			Rooms.upsert({ _id: roomData._id }, { $set, $unset });
+			const room = Rooms.findOne({ _id: roomData._id });
 
 			if (!room) {
 				throw new TypeError('room is undefined');
 			}
 
-			if (room._id !== reference && type === 'd') {
+			const { LegacyRoomManager } = await import('../../../../app/ui-utils/client');
+
+			if (reference !== undefined && room._id !== reference && type === 'd') {
 				// Redirect old url using username to rid
 				await LegacyRoomManager.close(type + reference);
-				throw new RoomNotFoundError(undefined, { rid: room._id });
+				directRoute.push({ rid: room._id }, (prev) => prev);
+				throw new OldUrlRoomError(undefined, { rid: room._id });
+			}
+
+			const { RoomManager } = await import('../../../lib/RoomManager');
+			const { fireGlobalEvent } = await import('../../../lib/utils/fireGlobalEvent');
+
+			unsubscribeFromRoomOpenedEvent.current();
+			unsubscribeFromRoomOpenedEvent.current = RoomManager.once('opened', () => fireGlobalEvent('room-opened', omit(room, 'usernames')));
+
+			const sub = Subscriptions.findOne({ rid: room._id });
+
+			// if user doesn't exist at this point, anonymous read is enabled, otherwise an error would have been thrown
+			if (user && !sub && !hasPreviewPermission) {
+				throw new NotSubscribedToRoomError(undefined, { rid: room._id });
 			}
 
 			LegacyRoomManager.open({ typeName: type + reference, rid: room._id });
@@ -69,31 +107,29 @@ export function useOpenRoom({ type, reference }: { type: RoomType; reference: st
 				return { rid: room._id };
 			}
 
-			fireGlobalEvent('room-opened', omit(room, 'usernames'));
-
 			// update user's room subscription
-			const sub = ChatSubscription.findOne({ rid: room._id });
-			if (sub && !sub.open) {
-				await openRoom(room._id);
+
+			if (!!user?._id && sub && !sub.open) {
+				await openRoom.mutateAsync({ roomId: room._id, userId: user._id });
 			}
+
 			return { rid: room._id };
 		},
-		{
-			retry: 0,
-			onError: async (error) => {
-				if (type !== 'd') {
-					return;
-				}
+		retry: 0,
+	});
 
-				if (error instanceof RoomNotFoundError && error.details !== undefined && 'rid' in error.details) {
-					directRoute.push({ rid: error.details.rid }, (prev) => prev);
-					return;
-				}
+	const queryClient = useQueryClient();
+	const { error } = result;
 
-				const { rid } = await createDirectMessage(...reference.split(', '));
-				await waitUntilFind(() => ChatSubscription.findOne({ rid }));
-				directRoute.push({ rid }, (prev) => prev);
-			},
-		},
-	);
+	useEffect(() => {
+		if (error) {
+			if (['l', 'v'].includes(type) && error instanceof RoomNotFoundError) {
+				Rooms.remove(reference);
+				queryClient.removeQueries({ queryKey: ['rooms', reference] });
+				queryClient.removeQueries({ queryKey: ['/v1/rooms.info', reference] });
+			}
+		}
+	}, [error, queryClient, reference, type]);
+
+	return result;
 }

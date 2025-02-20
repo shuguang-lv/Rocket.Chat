@@ -1,15 +1,13 @@
-/* eslint-env mocha */
-
 import type { ISetting } from '@rocket.chat/core-typings';
 import { expect } from 'chai';
+import { after, before, describe, it } from 'mocha';
 import type { Response } from 'supertest';
 
 import { getCredentials, api, request, credentials } from '../../../data/api-data';
+import { deleteVisitor } from '../../../data/livechat/rooms';
 import { updatePermission, updateSetting } from '../../../data/permissions.helper';
 
-describe('LIVECHAT - Integrations', function () {
-	this.retries(0);
-
+describe('LIVECHAT - Integrations', () => {
 	before((done) => getCredentials(done));
 
 	before(async () => {
@@ -52,9 +50,17 @@ describe('LIVECHAT - Integrations', function () {
 	});
 
 	describe('Incoming SMS', () => {
+		const visitorTokens: string[] = [];
+
 		before(async () => {
 			await updateSetting('SMS_Enabled', true);
 			await updateSetting('SMS_Service', '');
+		});
+
+		after(async () => {
+			await updateSetting('SMS_Default_Omnichannel_Department', '');
+			await updateSetting('SMS_Service', 'twilio');
+			return Promise.all(visitorTokens.map((token) => deleteVisitor(token)));
 		});
 
 		describe('POST livechat/sms-incoming/:service', () => {
@@ -123,6 +129,7 @@ describe('LIVECHAT - Integrations', function () {
 
 	describe('Livechat - Webhooks', () => {
 		const webhookUrl = process.env.WEBHOOK_TEST_URL || 'https://httpbin.org';
+
 		describe('livechat/webhook.test', () => {
 			it('should fail when user doesnt have view-livechat-webhooks permission', async () => {
 				await updatePermission('view-livechat-webhooks', []);

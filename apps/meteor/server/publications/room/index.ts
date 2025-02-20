@@ -1,19 +1,19 @@
+import type { IOmnichannelRoom, IRoom, RoomType } from '@rocket.chat/core-typings';
+import type { ServerMethods } from '@rocket.chat/ddp-client';
+import { Rooms } from '@rocket.chat/models';
 import { Meteor } from 'meteor/meteor';
 import _ from 'underscore';
-import type { IOmnichannelRoom, IRoom, RoomType } from '@rocket.chat/core-typings';
-import type { ServerMethods } from '@rocket.chat/ui-contexts';
-import { Rooms } from '@rocket.chat/models';
 
-import { roomCoordinator } from '../../lib/rooms/roomCoordinator';
 import { canAccessRoomAsync } from '../../../app/authorization/server';
 import { hasPermissionAsync } from '../../../app/authorization/server/functions/hasPermission';
 import { settings } from '../../../app/settings/server';
 import { roomFields } from '../../../lib/publishFields';
+import { roomCoordinator } from '../../lib/rooms/roomCoordinator';
 
 type PublicRoomField = keyof typeof roomFields;
 type PublicRoom = Pick<IRoom, PublicRoomField & keyof IRoom> & Pick<IOmnichannelRoom, PublicRoomField & keyof IOmnichannelRoom>;
 
-declare module '@rocket.chat/ui-contexts' {
+declare module '@rocket.chat/ddp-client' {
 	// eslint-disable-next-line @typescript-eslint/naming-convention
 	interface ServerMethods {
 		'rooms/get'(updatedAt?: Date): IRoom[] | { update: IRoom[]; remove: IRoom[] };
@@ -48,6 +48,12 @@ Meteor.methods<ServerMethods>({
 	},
 
 	async 'getRoomByTypeAndName'(type, name) {
+		if (!type || !name) {
+			throw new Meteor.Error('error-invalid-room', 'Invalid room', {
+				method: 'getRoomByTypeAndName',
+			});
+		}
+
 		const userId = Meteor.userId();
 
 		if (!userId && settings.get('Accounts_AllowAnonymousRead') === false) {

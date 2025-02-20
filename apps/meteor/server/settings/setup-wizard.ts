@@ -12,7 +12,7 @@ export const createSetupWSettings = () =>
 					},
 					{
 						key: 'enterprise',
-						i18nLabel: 'Enterprise',
+						i18nLabel: 'Premium',
 					},
 					{
 						key: 'government',
@@ -34,6 +34,7 @@ export const createSetupWSettings = () =>
 					step: 2,
 					order: 1,
 				},
+				public: true,
 			});
 			await this.add('Industry', '', {
 				type: 'select',
@@ -1204,6 +1205,13 @@ export const createSetupWSettings = () =>
 				secret: true,
 			});
 
+			await this.add('Cloud_Workspace_Supported_Versions_Token', '', {
+				type: 'string',
+				hidden: true,
+				readonly: true,
+				secret: true,
+			});
+
 			await this.add('Cloud_Url', 'https://cloud.rocket.chat', {
 				type: 'string',
 				hidden: true,
@@ -1213,6 +1221,13 @@ export const createSetupWSettings = () =>
 					value: true,
 				},
 				secret: true,
+			});
+
+			await this.add('Omnigateway_Url', 'https://omni-gateway.rocket.chat', {
+				type: 'string',
+				hidden: true,
+				secret: true,
+				readonly: true,
 			});
 
 			await this.add('Cloud_Service_Agree_PrivacyTerms', false, {
@@ -1263,7 +1278,7 @@ export const createSetupWSettings = () =>
 				secret: true,
 			});
 
-			await this.add('Cloud_Workspace_Client_Secret_Expires_At', '', {
+			await this.add('Cloud_Workspace_Client_Secret_Expires_At', 0, {
 				type: 'int',
 				hidden: true,
 				readonly: true,
@@ -1314,28 +1329,6 @@ export const createSetupWSettings = () =>
 				secret: true,
 			});
 
-			await this.add('Cloud_Workspace_Access_Token', '', {
-				type: 'string',
-				hidden: true,
-				readonly: true,
-				enableQuery: {
-					_id: 'Register_Server',
-					value: true,
-				},
-				secret: true,
-			});
-
-			await this.add('Cloud_Workspace_Access_Token_Expires_At', new Date(0), {
-				type: 'date',
-				hidden: true,
-				readonly: true,
-				enableQuery: {
-					_id: 'Register_Server',
-					value: true,
-				},
-				secret: true,
-			});
-
 			await this.add('Cloud_Workspace_Registration_State', '', {
 				type: 'string',
 				hidden: true,
@@ -1344,6 +1337,21 @@ export const createSetupWSettings = () =>
 					_id: 'Register_Server',
 					value: true,
 				},
+				secret: true,
+			});
+			await this.add('Cloud_Billing_Url', 'https://billing.rocket.chat', {
+				type: 'string',
+				hidden: true,
+				readonly: true,
+				enableQuery: {
+					_id: 'Register_Server',
+					value: true,
+				},
+				secret: true,
+			});
+			await this.add('Cloud_Sync_Announcement_Payload', 'null', {
+				type: 'string', // TODO: replace setting type string for object once is implemented.
+				hidden: true,
 				secret: true,
 			});
 		});

@@ -1,22 +1,25 @@
 import type { ServerResponse } from 'http';
 
-import { Meteor } from 'meteor/meteor';
-import { Random } from '@rocket.chat/random';
-import { Accounts } from 'meteor/accounts-base';
-import { escapeRegExp, escapeHTML } from '@rocket.chat/string-helpers';
 import type { IUser, IIncomingMessage, IPersonalAccessToken } from '@rocket.chat/core-typings';
 import { CredentialTokens, Rooms, Users } from '@rocket.chat/models';
+import { Random } from '@rocket.chat/random';
+import { escapeRegExp, escapeHTML } from '@rocket.chat/string-helpers';
+import { Accounts } from 'meteor/accounts-base';
+import { Meteor } from 'meteor/meteor';
 
-import { settings } from '../../../settings/server';
-import { saveUserIdentity, createRoom, generateUsernameSuggestion, addUserToRoom } from '../../../lib/server/functions';
 import { SAMLServiceProvider } from './ServiceProvider';
-import type { IServiceProviderOptions } from '../definition/IServiceProviderOptions';
+import { SAMLUtils } from './Utils';
+import { ensureArray } from '../../../../lib/utils/arrayUtils';
+import { SystemLogger } from '../../../../server/lib/logger/system';
+import { addUserToRoom } from '../../../lib/server/functions/addUserToRoom';
+import { createRoom } from '../../../lib/server/functions/createRoom';
+import { generateUsernameSuggestion } from '../../../lib/server/functions/getUsernameSuggestion';
+import { saveUserIdentity } from '../../../lib/server/functions/saveUserIdentity';
+import { settings } from '../../../settings/server';
+import { i18n } from '../../../utils/lib/i18n';
 import type { ISAMLAction } from '../definition/ISAMLAction';
 import type { ISAMLUser } from '../definition/ISAMLUser';
-import { SAMLUtils } from './Utils';
-import { SystemLogger } from '../../../../server/lib/logger/system';
-import { ensureArray } from '../../../../lib/utils/arrayUtils';
-import { i18n } from '../../../utils/lib/i18n';
+import type { IServiceProviderOptions } from '../definition/IServiceProviderOptions';
 
 const showErrorMessage = function (res: ServerResponse, err: string): void {
 	res.writeHead(200, {
@@ -120,6 +123,7 @@ export class SAML {
 		}));
 
 		let { username } = userObject;
+		const { fullName } = userObject;
 
 		const active = !settings.get('Accounts_ManuallyApproveNewUsers');
 
@@ -128,7 +132,7 @@ export class SAML {
 			const roles = userObject.roles?.length ? userObject.roles : ensureArray<string>(defaultUserRole.split(','));
 
 			const newUser: Record<string, any> = {
-				name: userObject.fullName,
+				name: fullName,
 				active,
 				globalRoles: roles,
 				emails,
@@ -159,7 +163,7 @@ export class SAML {
 				}
 			}
 
-			const userId = Accounts.insertUserDoc({}, newUser);
+			const userId = await Accounts.insertUserDoc({}, newUser);
 			user = await Users.findOneById(userId);
 
 			if (user && userObject.channels && channelsAttributeUpdate !== true) {
@@ -194,11 +198,6 @@ export class SAML {
 			updateData.emails = emails;
 		}
 
-		// Overwrite fullname if needed
-		if (nameOverwrite === true) {
-			updateData.name = userObject.fullName;
-		}
-
 		// When updating an user, we only update the roles if we received them from the mapping
 		if (userObject.roles?.length) {
 			updateData.roles = userObject.roles;
@@ -217,8 +216,8 @@ export class SAML {
 			},
 		);
 
-		if (username && username !== user.username) {
-			await saveUserIdentity({ _id: user._id, username });
+		if ((username && username !== user.username) || (nameOverwrite && fullName && fullName !== user.name)) {
+			await saveUserIdentity({ _id: user._id, name: nameOverwrite ? fullName || undefined : user.name, username });
 		}
 
 		// sending token along with the userId
@@ -268,7 +267,7 @@ export class SAML {
 				throw new Meteor.Error('Unable to process Logout Request: missing request data.');
 			}
 
-			let timeoutHandler: NodeJS.Timer | null = null;
+			let timeoutHandler: NodeJS.Timeout | undefined = undefined;
 			const redirect = (url?: string | undefined): void => {
 				if (!timeoutHandler) {
 					// If the handler is null, then we already ended the response;
@@ -276,7 +275,7 @@ export class SAML {
 				}
 
 				clearTimeout(timeoutHandler);
-				timeoutHandler = null;
+				timeoutHandler = undefined;
 
 				res.writeHead(302, {
 					Location: url || Meteor.absoluteUrl(),
@@ -378,13 +377,11 @@ export class SAML {
 		service: IServiceProviderOptions,
 		samlObject: ISAMLAction,
 	): Promise<void> {
-		service.id = samlObject.credentialToken;
-
 		const serviceProvider = new SAMLServiceProvider(service);
 		let url: string | undefined;
 
 		try {
-			url = await serviceProvider.getAuthorizeUrl();
+			url = await serviceProvider.getAuthorizeUrl(samlObject.credentialToken);
 		} catch (err: any) {
 			SAMLUtils.error('Unable to generate authorize url');
 			SAMLUtils.error(err);
@@ -426,7 +423,7 @@ export class SAML {
 				};
 
 				await this.storeCredential(credentialToken, loginResult);
-				const url = `${Meteor.absoluteUrl('home')}?saml_idp_credentialToken=${credentialToken}`;
+				const url = Meteor.absoluteUrl(SAMLUtils.getValidationActionRedirectPath(credentialToken));
 				res.writeHead(302, {
 					Location: url,
 				});
@@ -476,7 +473,6 @@ export class SAML {
 					continue;
 				}
 
-				const room = await Rooms.findOneByNameAndType(roomName, 'c', {});
 				const privRoom = await Rooms.findOneByNameAndType(roomName, 'p', {});
 
 				if (privRoom && includePrivateChannelsInUpdate === true) {
@@ -484,6 +480,7 @@ export class SAML {
 					continue;
 				}
 
+				const room = await Rooms.findOneByNameAndType(roomName, 'c', {});
 				if (room) {
 					await addUserToRoom(room._id, user);
 					continue;
@@ -492,7 +489,7 @@ export class SAML {
 				if (!room && !privRoom) {
 					// If the user doesn't have an username yet, we can't create new rooms for them
 					if (user.username) {
-						await createRoom('c', roomName, user.username);
+						await createRoom('c', roomName, user);
 					}
 				}
 			}

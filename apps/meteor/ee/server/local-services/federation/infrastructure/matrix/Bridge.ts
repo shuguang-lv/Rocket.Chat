@@ -1,17 +1,20 @@
 import { RoomType } from '@rocket.chat/apps-engine/definition/rooms';
 
-import type { IFederationBridgeEE, IFederationPublicRoomsResult, IFederationSearchPublicRoomsParams } from '../../domain/IFederationBridge';
 import { MatrixBridge } from '../../../../../../server/services/federation/infrastructure/matrix/Bridge';
-import type { RocketChatSettingsAdapter } from '../../../../../../server/services/federation/infrastructure/rocket-chat/adapters/Settings';
 import type { AbstractMatrixEvent } from '../../../../../../server/services/federation/infrastructure/matrix/definitions/AbstractMatrixEvent';
 import { MATRIX_POWER_LEVELS } from '../../../../../../server/services/federation/infrastructure/matrix/definitions/MatrixPowerLevels';
-import { MatrixRoomVisibility } from '../../../../../../server/services/federation/infrastructure/matrix/definitions/MatrixRoomVisibility';
 import { MatrixRoomType } from '../../../../../../server/services/federation/infrastructure/matrix/definitions/MatrixRoomType';
+import { MatrixRoomVisibility } from '../../../../../../server/services/federation/infrastructure/matrix/definitions/MatrixRoomVisibility';
+import type { RocketChatSettingsAdapter } from '../../../../../../server/services/federation/infrastructure/rocket-chat/adapters/Settings';
+import type { IFederationBridgeEE, IFederationPublicRoomsResult, IFederationSearchPublicRoomsParams } from '../../domain/IFederationBridge';
 
 const DEFAULT_TIMEOUT_IN_MS = 10000;
 
 export class MatrixBridgeEE extends MatrixBridge implements IFederationBridgeEE {
-	constructor(protected internalSettings: RocketChatSettingsAdapter, protected eventHandler: (event: AbstractMatrixEvent) => void) {
+	constructor(
+		protected internalSettings: RocketChatSettingsAdapter,
+		protected eventHandler: (event: AbstractMatrixEvent) => void,
+	) {
 		super(internalSettings, eventHandler);
 	}
 

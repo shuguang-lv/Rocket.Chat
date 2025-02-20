@@ -1,7 +1,7 @@
 import { Emitter } from '@rocket.chat/emitter';
 
-import type { DDPClient } from './types/DDPClient';
 import type { Connection } from './Connection';
+import type { DDPClient } from './types/DDPClient';
 
 export interface TimeoutControlEvents
 	extends Emitter<{
@@ -25,9 +25,12 @@ export class TimeoutControl
 
 	private heartbeatId: ReturnType<typeof setTimeout> | undefined;
 
-	constructor(readonly timeout: number = 60_000, readonly heartbeat: number = timeout / 2) {
+	constructor(
+		readonly timeout: number = 60_000,
+		readonly heartbeat: number = timeout / 2,
+	) {
 		super();
-		this.reset();
+		/* istanbul ignore next */
 		if (this.heartbeat >= this.timeout) {
 			throw new Error('Heartbeat must be less than timeout');
 		}
@@ -65,6 +68,18 @@ export class TimeoutControl
 		});
 
 		ddp.onMessage(() => timeoutControl.reset());
+
+		connection.on('close', () => {
+			timeoutControl.stop();
+		});
+
+		connection.on('disconnected', () => {
+			timeoutControl.stop();
+		});
+
+		connection.on('connected', () => {
+			timeoutControl.reset();
+		});
 
 		return timeoutControl;
 	}

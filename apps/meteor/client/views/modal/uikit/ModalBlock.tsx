@@ -1,15 +1,12 @@
-import type { IUIKitSurface } from '@rocket.chat/apps-engine/definition/uikit';
 import { Modal, AnimatedVisibility, Button, Box } from '@rocket.chat/fuselage';
-import { useUniqueId } from '@rocket.chat/fuselage-hooks';
 import { UiKitComponent, UiKitModal, modalParser } from '@rocket.chat/fuselage-ui-kit';
-import type { LayoutBlock } from '@rocket.chat/ui-kit';
-import { BlockContext } from '@rocket.chat/ui-kit';
-import type { FormEventHandler, ReactElement } from 'react';
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import * as UiKit from '@rocket.chat/ui-kit';
+import type { FormEvent, FormEventHandler, ReactElement } from 'react';
+import { useId, useCallback, useEffect, useMemo, useRef } from 'react';
 import { FocusScope } from 'react-aria';
 
-import { getURL } from '../../../../app/utils/client/getURL';
 import { getButtonStyle } from './getButtonStyle';
+import { getURL } from '../../../../app/utils/client/getURL';
 
 const focusableElementsString = `
 	a[href]:not([tabindex="-1"]),
@@ -38,12 +35,12 @@ const focusableElementsStringInvalid = `
 	[contenteditable]:invalid`;
 
 type ModalBlockParams = {
-	view: IUIKitSurface & { showIcon?: boolean };
+	view: UiKit.ModalView;
 	errors: any;
 	appId: string;
-	onSubmit: FormEventHandler<HTMLElement>;
+	onSubmit: (event: FormEvent) => void;
 	onClose: () => void;
-	onCancel: FormEventHandler<HTMLElement>;
+	onCancel: FormEventHandler;
 };
 
 const isFocusable = (element: Element | null): element is HTMLElement =>
@@ -55,8 +52,8 @@ const KeyboardCode = new Map<string, number>([
 	['TAB', 9],
 ]);
 
-const ModalBlock = ({ view, errors, appId, onSubmit, onClose, onCancel }: ModalBlockParams): ReactElement => {
-	const id = `modal_id_${useUniqueId()}`;
+const ModalBlock = ({ view, errors, onSubmit, onClose, onCancel }: ModalBlockParams): ReactElement => {
+	const id = `modal_id_${useId()}`;
 	const ref = useRef<HTMLElement>(null);
 
 	useEffect(() => {
@@ -84,12 +81,15 @@ const ModalBlock = ({ view, errors, appId, onSubmit, onClose, onCancel }: ModalB
 		[previousFocus],
 	);
 
+	const formRef = useRef<HTMLFormElement>(null);
+
 	const handleKeyDown = useCallback(
-		(event) => {
+		(event: KeyboardEvent) => {
 			switch (event.keyCode) {
 				case KeyboardCode.get('ENTER'):
-					if (event?.target?.nodeName !== 'TEXTAREA') {
-						return onSubmit(event);
+					if ((event?.target as Node | null)?.nodeName !== 'TEXTAREA') {
+						formRef.current?.submit();
+						return;
 					}
 					return;
 				case KeyboardCode.get('ESC'):
@@ -125,7 +125,7 @@ const ModalBlock = ({ view, errors, appId, onSubmit, onClose, onCancel }: ModalB
 					}
 			}
 		},
-		[onClose, onSubmit],
+		[onClose],
 	);
 
 	useEffect(() => {
@@ -141,7 +141,7 @@ const ModalBlock = ({ view, errors, appId, onSubmit, onClose, onCancel }: ModalB
 			return false;
 		};
 
-		const ignoreIfNotContains = (e: Event) => {
+		const ignoreIfNotContains = (e: KeyboardEvent) => {
 			if (e.target !== element) {
 				return;
 			}
@@ -149,7 +149,7 @@ const ModalBlock = ({ view, errors, appId, onSubmit, onClose, onCancel }: ModalB
 			if (!container.contains(e.target as HTMLElement)) {
 				return;
 			}
-			return handleKeyDown(e);
+			return handleKeyDown(e as KeyboardEvent);
 		};
 
 		document.addEventListener('keydown', ignoreIfNotContains);
@@ -165,25 +165,25 @@ const ModalBlock = ({ view, errors, appId, onSubmit, onClose, onCancel }: ModalB
 			<FocusScope contain restoreFocus autoFocus>
 				<Modal open id={id} ref={ref}>
 					<Modal.Header>
-						{view.showIcon ? <Modal.Thumb url={getURL(`/api/apps/${appId}/icon`)} /> : null}
-						<Modal.Title>{modalParser.text(view.title, BlockContext.NONE, 0)}</Modal.Title>
+						{view.showIcon ? <Modal.Thumb url={getURL(`/api/apps/${view.appId}/icon`)} /> : null}
+						<Modal.Title>{modalParser.text(view.title, UiKit.BlockContext.NONE, 0)}</Modal.Title>
 						<Modal.Close tabIndex={-1} onClick={onClose} />
 					</Modal.Header>
 					<Modal.Content>
-						<Box is='form' method='post' action='#' onSubmit={onSubmit}>
-							<UiKitComponent render={UiKitModal} blocks={view.blocks as LayoutBlock[]} />
+						<Box ref={formRef} is='form' method='post' action='#' onSubmit={onSubmit}>
+							<UiKitComponent render={UiKitModal} blocks={view.blocks} />
 						</Box>
 					</Modal.Content>
 					<Modal.Footer>
 						<Modal.FooterControllers>
 							{view.close && (
 								<Button danger={view.close.style === 'danger'} onClick={onCancel}>
-									{modalParser.text(view.close.text, BlockContext.NONE, 0)}
+									{modalParser.text(view.close.text, UiKit.BlockContext.NONE, 0)}
 								</Button>
 							)}
 							{view.submit && (
-								<Button {...getButtonStyle(view)} onClick={onSubmit}>
-									{modalParser.text(view.submit.text, BlockContext.NONE, 1)}
+								<Button {...getButtonStyle(view.submit)} onClick={onSubmit}>
+									{modalParser.text(view.submit.text, UiKit.BlockContext.NONE, 1)}
 								</Button>
 							)}
 						</Modal.FooterControllers>

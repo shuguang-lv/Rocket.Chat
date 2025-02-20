@@ -1,29 +1,37 @@
-import filesize from 'filesize';
 import { LivechatVisitors, LivechatRooms } from '@rocket.chat/models';
+import filesize from 'filesize';
 
-import { settings } from '../../../../settings/server';
-import { fileUploadIsValidContentType } from '../../../../utils/server';
-import { FileUpload } from '../../../../file-upload/server';
 import { API } from '../../../../api/server';
 import { getUploadFormData } from '../../../../api/server/lib/getUploadFormData';
+import { FileUpload } from '../../../../file-upload/server';
+import { settings } from '../../../../settings/server';
+import { fileUploadIsValidContentType } from '../../../../utils/server/restrictions';
 import { sendFileLivechatMessage } from '../../../server/methods/sendFileLivechatMessage';
 
 API.v1.addRoute('livechat/upload/:rid', {
 	async post() {
 		if (!this.request.headers['x-visitor-token']) {
-			return API.v1.unauthorized();
+			return API.v1.forbidden();
+		}
+
+		const canUpload = settings.get<boolean>('Livechat_fileupload_enabled') && settings.get<boolean>('FileUpload_Enabled');
+
+		if (!canUpload) {
+			return API.v1.failure({
+				reason: 'error-file-upload-disabled',
+			});
 		}
 
 		const visitorToken = this.request.headers['x-visitor-token'];
 		const visitor = await LivechatVisitors.getVisitorByToken(visitorToken as string, {});
 
 		if (!visitor) {
-			return API.v1.unauthorized();
+			return API.v1.forbidden();
 		}
 
 		const room = await LivechatRooms.findOneOpenByRoomIdAndVisitorToken(this.urlParams.rid, visitorToken as string);
 		if (!room) {
-			return API.v1.unauthorized();
+			return API.v1.forbidden();
 		}
 
 		const maxFileSize = settings.get<number>('FileUpload_MaxFileSize') || 104857600;

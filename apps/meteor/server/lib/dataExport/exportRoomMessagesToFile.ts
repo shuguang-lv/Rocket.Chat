@@ -1,11 +1,11 @@
 import { mkdir, writeFile } from 'fs/promises';
 
-import { Messages } from '@rocket.chat/models';
 import type { IMessage, IRoom, IUser, MessageAttachment, FileProp, RoomType } from '@rocket.chat/core-typings';
+import { Messages } from '@rocket.chat/models';
 
 import { settings } from '../../../app/settings/server';
-import { joinPath } from '../fileUtils';
 import { readSecondaryPreferred } from '../../database/readSecondaryPreferred';
+import { joinPath } from '../fileUtils';
 import { i18n } from '../i18n';
 
 const hideUserName = (
@@ -56,13 +56,13 @@ const getAttachmentData = (attachment: MessageAttachment, message: IMessage) => 
 	};
 };
 
-type MessageData = Pick<IMessage, 'msg' | 'ts'> & {
+export type MessageData = Pick<IMessage, 'msg' | 'ts'> & {
 	username?: IUser['username'] | IUser['name'];
 	attachments?: ReturnType<typeof getAttachmentData>[];
 	type?: IMessage['t'];
 };
 
-const getMessageData = (
+export const getMessageData = (
 	msg: IMessage,
 	hideUsers: boolean,
 	userData: Pick<IUser, 'username'> | undefined,
@@ -160,7 +160,7 @@ const getMessageData = (
 	return messageObject;
 };
 
-const exportMessageObject = (type: 'json' | 'html', messageObject: MessageData, messageFile?: FileProp): string => {
+export const exportMessageObject = (type: 'json' | 'html', messageObject: MessageData, messageFile?: FileProp): string => {
 	if (type === 'json') {
 		return JSON.stringify(messageObject);
 	}
@@ -192,7 +192,7 @@ const exportMessageObject = (type: 'json' | 'html', messageObject: MessageData, 
 	return file.join('\n');
 };
 
-const exportRoomMessages = async (
+export const exportRoomMessages = async (
 	rid: IRoom['_id'],
 	exportType: 'json' | 'html',
 	skip: number,

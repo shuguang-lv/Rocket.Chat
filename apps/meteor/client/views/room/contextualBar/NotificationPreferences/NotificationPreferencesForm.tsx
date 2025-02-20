@@ -1,12 +1,11 @@
 import type { SelectOption } from '@rocket.chat/fuselage';
 import { FieldGroup, IconButton, Margins } from '@rocket.chat/fuselage';
-import { useTranslation } from '@rocket.chat/ui-contexts';
-import React from 'react';
 import { useFormContext, Controller } from 'react-hook-form';
+import { useTranslation } from 'react-i18next';
 
 import NotificationByDevice from './components/NotificationByDevice';
 import NotificationPreference from './components/NotificationPreference';
-import NotificationToogle from './components/NotificationToogle';
+import NotificationToggle from './components/NotificationToggle';
 
 type NotificationPreferencesFormProps = {
 	notificationOptions: {
@@ -16,7 +15,7 @@ type NotificationPreferencesFormProps = {
 };
 
 const NotificationPreferencesForm = ({ notificationOptions, handlePlaySound }: NotificationPreferencesFormProps) => {
-	const t = useTranslation();
+	const { t } = useTranslation();
 	const { watch, control } = useFormContext();
 
 	const { showCounter } = watch();
@@ -27,21 +26,21 @@ const NotificationPreferencesForm = ({ notificationOptions, handlePlaySound }: N
 				control={control}
 				name='turnOn'
 				render={({ field: { value, onChange } }) => (
-					<NotificationToogle label={t('Turn_ON')} description={t('Receive_alerts')} onChange={onChange} defaultChecked={value} />
+					<NotificationToggle label={t('Turn_ON')} description={t('Receive_alerts')} onChange={onChange} defaultChecked={value} />
 				)}
 			/>
 			<Controller
 				control={control}
 				name='muteGroupMentions'
 				render={({ field: { value, onChange } }) => (
-					<NotificationToogle label={t('Mute_Group_Mentions')} onChange={onChange} defaultChecked={value} />
+					<NotificationToggle label={t('Mute_Group_Mentions')} onChange={onChange} defaultChecked={value} />
 				)}
 			/>
 			<Controller
 				control={control}
 				name='showCounter'
 				render={({ field: { value, onChange } }) => (
-					<NotificationToogle
+					<NotificationToggle
 						label={t('Show_counter')}
 						description={t('Display_unread_counter')}
 						onChange={onChange}
@@ -54,7 +53,7 @@ const NotificationPreferencesForm = ({ notificationOptions, handlePlaySound }: N
 					control={control}
 					name='showMentions'
 					render={({ field: { value, onChange } }) => (
-						<NotificationToogle
+						<NotificationToggle
 							label={t('Show_mentions')}
 							description={t('Display_mentions_counter')}
 							onChange={onChange}
@@ -78,7 +77,7 @@ const NotificationPreferencesForm = ({ notificationOptions, handlePlaySound }: N
 							/>
 						)}
 					/>
-					<Margins blockStart='x16'>
+					<Margins blockStart={16}>
 						<Controller
 							control={control}
 							name='desktopSound'
@@ -90,7 +89,7 @@ const NotificationPreferencesForm = ({ notificationOptions, handlePlaySound }: N
 									optionValue={value}
 									onChange={onChange}
 								>
-									<IconButton icon='play' mis='x4' onClick={handlePlaySound} />
+									<IconButton icon='play' mis={4} onClick={handlePlaySound} />
 								</NotificationPreference>
 							)}
 						/>
@@ -111,7 +110,7 @@ const NotificationPreferencesForm = ({ notificationOptions, handlePlaySound }: N
 						)}
 					/>
 				</NotificationByDevice>
-				<NotificationByDevice device={t('Email')} icon={'mail'}>
+				<NotificationByDevice device={t('Email')} icon='mail'>
 					<Controller
 						control={control}
 						name='emailAlert'

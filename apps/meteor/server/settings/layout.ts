@@ -8,18 +8,21 @@ export const createLayoutSettings = () =>
 				public: true,
 				enterprise: true,
 				invalidValue: false,
+				modules: ['hide-watermark'],
 			});
 			await this.add('Layout_Login_Hide_Title', false, {
 				type: 'boolean',
 				public: true,
 				enterprise: true,
 				invalidValue: false,
+				modules: ['hide-watermark'],
 			});
 			await this.add('Layout_Login_Hide_Powered_By', false, {
 				type: 'boolean',
 				public: true,
 				enterprise: true,
 				invalidValue: false,
+				modules: ['hide-watermark'],
 			});
 			await this.add('Layout_Login_Template', 'horizontal-template', {
 				type: 'select',
@@ -36,6 +39,7 @@ export const createLayoutSettings = () =>
 				public: true,
 				enterprise: true,
 				invalidValue: 'horizontal-template',
+				modules: ['hide-watermark'],
 			});
 			await this.add('Accounts_ShowFormLogin', true, {
 				type: 'boolean',
@@ -108,15 +112,12 @@ export const createLayoutSettings = () =>
 				multiline: true,
 				public: true,
 			});
-			await this.add(
-				'Layout_Login_Terms',
-				'By proceeding you are agreeing to our <a href="terms-of-service">Terms of Service</a>, <a href="privacy-policy">Privacy Policy</a> and <a href="legal-notice">Legal Notice</a>.',
-				{
-					type: 'string',
-					multiline: true,
-					public: true,
-				},
-			);
+			await this.add('Layout_Login_Terms', '', {
+				type: 'code',
+				code: 'text/html',
+				multiline: true,
+				public: true,
+			});
 			await this.add('Layout_Privacy_Policy', 'Privacy Policy <br> Go to APP SETTINGS &rarr; Layout to customize this page.', {
 				type: 'code',
 				code: 'text/html',
@@ -173,10 +174,6 @@ export const createLayoutSettings = () =>
 				public: true,
 			});
 			await this.add('UI_Use_Real_Name', false, {
-				type: 'boolean',
-				public: true,
-			});
-			await this.add('UI_Click_Direct_Message', false, {
 				type: 'boolean',
 				public: true,
 			});

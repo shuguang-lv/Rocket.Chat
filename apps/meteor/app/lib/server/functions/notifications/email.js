@@ -1,19 +1,19 @@
-import { Meteor } from 'meteor/meteor';
 import { escapeHTML } from '@rocket.chat/string-helpers';
+import { Meteor } from 'meteor/meteor';
 
-import * as Mailer from '../../../../mailer/server/api';
-import { settings } from '../../../../settings/server';
-import { metrics } from '../../../../metrics/server';
 import { callbacks } from '../../../../../lib/callbacks';
-import { getURL } from '../../../../utils/server';
-import { roomCoordinator } from '../../../../../server/lib/rooms/roomCoordinator';
 import { ltrim } from '../../../../../lib/utils/stringUtils';
 import { i18n } from '../../../../../server/lib/i18n';
+import { roomCoordinator } from '../../../../../server/lib/rooms/roomCoordinator';
+import * as Mailer from '../../../../mailer/server/api';
+import { metrics } from '../../../../metrics/server';
+import { settings } from '../../../../settings/server';
+import { getURL } from '../../../../utils/server/getURL';
 
 let advice = '';
 let goToMessage = '';
 Meteor.startup(() => {
-	settings.watch('email_style', function () {
+	settings.watch('email_style', () => {
 		goToMessage = Mailer.inlinecss('<p><a class=\'btn\' href="[room_path]">{Offline_Link_Message}</a></p>');
 	});
 	Mailer.getTemplate('Email_Footer_Direct_Reply', (value) => {
@@ -21,7 +21,7 @@ Meteor.startup(() => {
 	});
 });
 
-async function getEmailContent({ message, user, room }) {
+export async function getEmailContent({ message, user, room }) {
 	const lng = (user && user.language) || settings.get('Language') || 'en';
 
 	const roomName = escapeHTML(`#${await roomCoordinator.getRoomName(room.t, room)}`);
@@ -35,16 +35,16 @@ async function getEmailContent({ message, user, room }) {
 		lng,
 	});
 
+	if (message.t === 'e2e' && !message.file) {
+		return settings.get('Email_notification_show_message') ? i18n.t('Encrypted_message_preview_unavailable', { lng }) : header;
+	}
+
 	if (message.msg !== '') {
 		if (!settings.get('Email_notification_show_message')) {
 			return header;
 		}
 
 		let messageContent = escapeHTML(message.msg);
-
-		if (message.t === 'e2e') {
-			messageContent = i18n.t('Encrypted_message', { lng });
-		}
 
 		message = await callbacks.run('renderMessage', message);
 		if (message.tokens && message.tokens.length > 0) {
@@ -224,6 +224,6 @@ export function shouldNotifyEmail({
 			emailNotifications === 'all' ||
 			hasMentionToUser ||
 			(!disableAllMessageNotifications && hasMentionToAll)) &&
-		(!isThread || hasReplyToThread)
+		(isHighlighted || !isThread || hasReplyToThread)
 	);
 }

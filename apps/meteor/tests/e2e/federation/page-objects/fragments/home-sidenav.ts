@@ -32,11 +32,11 @@ export class FederationSidenav {
 	}
 
 	get btnCreateChannel(): Locator {
-		return this.page.locator('//*[@id="modal-root"]//button[contains(text(), "Create")]');
+		return this.page.locator('role=button[name="Create"]');
 	}
 
 	async logout(): Promise<void> {
-		await this.page.locator('[data-qa="sidebar-avatar-button"]').click();
+		await this.page.getByRole('button', { name: 'User menu' }).click();
 		await this.page.locator('//*[contains(@class, "rcx-option__content") and contains(text(), "Logout")]').click();
 	}
 
@@ -89,7 +89,7 @@ export class FederationSidenav {
 		await this.page.locator('role=search >> role=searchbox').type(name);
 		await this.page.locator(`role=search >> role=listbox >> role=link >> text="${name}"`).waitFor();
 		await this.page.waitForTimeout(2000);
-		
+
 		return this.page.locator(`role=search >> role=listbox >> role=link >> text="${name}"`).count();
 	}
 

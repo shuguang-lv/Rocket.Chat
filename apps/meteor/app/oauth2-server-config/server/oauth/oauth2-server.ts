@@ -1,11 +1,12 @@
-import { Meteor } from 'meteor/meteor';
-import { WebApp } from 'meteor/webapp';
-import type { Request, Response } from 'express';
 import type { IUser } from '@rocket.chat/core-typings';
 import { OAuthAccessTokens, Users } from '@rocket.chat/models';
+import type { Request, Response } from 'express';
+import type express from 'express';
+import { Meteor } from 'meteor/meteor';
+import { WebApp } from 'meteor/webapp';
 
-import { API } from '../../../api/server';
 import { OAuth2Server } from '../../../../server/oauth2-server/oauth';
+import { API } from '../../../api/server';
 
 const oauth2server = new OAuth2Server({
 	// If you're developing something related to oauth servers, you should change this to true
@@ -42,9 +43,7 @@ export async function oAuth2ServerAuth(partialRequest: {
 
 oauth2server.app.disable('x-powered-by');
 
-WebApp.connectHandlers.use(oauth2server.app);
-
-oauth2server.app.get('/oauth/userinfo', async function (req: Request, res: Response) {
+oauth2server.app.get('/oauth/userinfo', async (req: Request, res: Response) => {
 	if (req.headers.authorization == null) {
 		return res.status(401).send('No token');
 	}
@@ -73,3 +72,5 @@ oauth2server.app.get('/oauth/userinfo', async function (req: Request, res: Respo
 API.v1.addAuthMethod(async function () {
 	return oAuth2ServerAuth(this.request);
 });
+
+(WebApp.connectHandlers as unknown as ReturnType<typeof express>).use(oauth2server.app);

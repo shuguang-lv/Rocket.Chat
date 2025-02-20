@@ -1,47 +1,55 @@
-import type { IMessage, IModerationReport } from '@rocket.chat/core-typings';
-import { isE2EEMessage } from '@rocket.chat/core-typings';
-import { Message, MessageName, MessageToolboxItem, MessageToolboxWrapper, MessageUsername } from '@rocket.chat/fuselage';
-import { useSetting, useTranslation } from '@rocket.chat/ui-contexts';
-import React from 'react';
+import type { IMessage, MessageReport, MessageAttachment } from '@rocket.chat/core-typings';
+import { isE2EEMessage, isQuoteAttachment } from '@rocket.chat/core-typings';
+import { Message, MessageName, MessageToolbarItem, MessageToolbarWrapper, MessageUsername } from '@rocket.chat/fuselage';
+import { UserAvatar } from '@rocket.chat/ui-avatar';
+import { useUserDisplayName } from '@rocket.chat/ui-client';
+import { useSetting } from '@rocket.chat/ui-contexts';
+import { useTranslation } from 'react-i18next';
 
-import UserAvatar from '../../../../components/avatar/UserAvatar';
+import ReportReasonCollapsible from './ReportReasonCollapsible';
 import MessageContentBody from '../../../../components/message/MessageContentBody';
 import Attachments from '../../../../components/message/content/Attachments';
-import UiKitSurface from '../../../../components/message/content/UiKitSurface';
+import UiKitMessageBlock from '../../../../components/message/uikit/UiKitMessageBlock';
 import { useFormatDate } from '../../../../hooks/useFormatDate';
 import { useFormatDateAndTime } from '../../../../hooks/useFormatDateAndTime';
 import { useFormatTime } from '../../../../hooks/useFormatTime';
-import { useUserDisplayName } from '../../../../hooks/useUserDisplayName';
+import MessageReportInfo from '../MessageReportInfo';
 import useDeleteMessage from '../hooks/useDeleteMessage';
+import { useDismissMessageAction } from '../hooks/useDismissMessageAction';
 
 const ContextMessage = ({
 	message,
 	room,
-	handleClick,
+	deleted,
 	onRedirect,
 	onChange,
 }: {
 	message: any;
-	room: IModerationReport['room'];
-	handleClick: (id: IMessage['_id']) => void;
+	room: MessageReport['room'];
+	deleted: boolean;
 	onRedirect: (id: IMessage['_id']) => void;
 	onChange: () => void;
 }): JSX.Element => {
-	const t = useTranslation();
+	const { t } = useTranslation();
 
 	const isEncryptedMessage = isE2EEMessage(message);
 
 	const deleteMessage = useDeleteMessage(message._id, message.rid, onChange);
+	const dismissMsgReport = useDismissMessageAction(message._id);
 
 	const formatDateAndTime = useFormatDateAndTime();
 	const formatTime = useFormatTime();
 	const formatDate = useFormatDate();
-	const useRealName = Boolean(useSetting('UI_Use_Real_Name'));
+	const useRealName = useSetting('UI_Use_Real_Name', false);
 
 	const name = message.u.name || '';
 	const username = message.u.username || '';
 
 	const displayName = useUserDisplayName({ name, username });
+
+	const quotes = message?.attachments?.filter(isQuoteAttachment) || [];
+
+	const attachments = message?.attachments?.filter((attachment: MessageAttachment) => !isQuoteAttachment(attachment)) || [];
 
 	return (
 		<>
@@ -61,6 +69,7 @@ const ContextMessage = ({
 						<Message.Role>{room.name || room.fname || 'DM'}</Message.Role>
 					</Message.Header>
 					<Message.Body>
+						{!!quotes?.length && <Attachments attachments={quotes} />}
 						{!message.blocks?.length && !!message.md?.length ? (
 							<>
 								{(!isEncryptedMessage || message.e2e === 'done') && (
@@ -71,17 +80,25 @@ const ContextMessage = ({
 						) : (
 							message.msg
 						)}
-						{message.blocks && <UiKitSurface mid={message._id} blocks={message.blocks} appId rid={message.rid} />}
-						{message.attachments && <Attachments attachments={message.attachments} />}
+
+						{!!attachments && <Attachments id={message.files?.[0]?._id} attachments={attachments} />}
+						{message.blocks && <UiKitMessageBlock rid={message.rid} mid={message._id} blocks={message.blocks} />}
 					</Message.Body>
+					<ReportReasonCollapsible>
+						<MessageReportInfo msgId={message._id} />
+					</ReportReasonCollapsible>
 				</Message.Container>
-				<MessageToolboxWrapper>
-					<Message.Toolbox>
-						<MessageToolboxItem icon='document-eye' title={t('Moderation_View_reports')} onClick={() => handleClick(message._id)} />
-						<MessageToolboxItem icon='arrow-forward' title={t('Moderation_Go_to_message')} onClick={() => onRedirect(message._id)} />
-						<MessageToolboxItem icon='trash' title={t('Moderation_Delete_message')} onClick={() => deleteMessage()} />
-					</Message.Toolbox>
-				</MessageToolboxWrapper>
+				<MessageToolbarWrapper>
+					<Message.Toolbar>
+						<MessageToolbarItem
+							icon='checkmark-circled'
+							title={t('Moderation_Dismiss_reports')}
+							onClick={() => dismissMsgReport.action()}
+						/>
+						<MessageToolbarItem icon='arrow-forward' title={t('Moderation_Go_to_message')} onClick={() => onRedirect(message._id)} />
+						<MessageToolbarItem disabled={deleted} icon='trash' title={t('Moderation_Delete_message')} onClick={() => deleteMessage()} />
+					</Message.Toolbar>
+				</MessageToolbarWrapper>
 			</Message>
 		</>
 	);
